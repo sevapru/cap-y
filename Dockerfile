@@ -32,6 +32,9 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
 RUN rm -f /usr/lib/python3.12/EXTERNALLY-MANAGED
 
 COPY --from=ghcr.io/astral-sh/uv:0.7 /uv /usr/local/bin/uv
+
+RUN uv pip install --system numpy==1.26.4
+
 RUN mkdir -p /opt/opencv-build && cd /opt/opencv-build && \
     git clone --depth 1 --branch ${OPENCV_VERSION} https://github.com/opencv/opencv.git && \
     git clone --depth 1 --branch ${OPENCV_VERSION} https://github.com/opencv/opencv_contrib.git
@@ -79,6 +82,11 @@ RUN --mount=type=cache,target=/root/.ccache \
       -DBUILD_opencv_rgbd=OFF \
       -DBUILD_opencv_python2=OFF \
       -DBUILD_opencv_python3=ON \
+      -DPYTHON3_EXECUTABLE=/usr/bin/python3.12 \
+      -DPYTHON3_INCLUDE_DIR=$(python3.12 -c "from sysconfig import get_paths; print(get_paths()['include'])") \
+      -DPYTHON3_LIBRARY=$(find /usr/lib -name 'libpython3.12*.so*' | head -1) \
+      -DPYTHON3_PACKAGES_PATH=/usr/local/lib/python3.12/dist-packages \
+      -DPYTHON3_NUMPY_INCLUDE_DIRS=$(python3.12 -c "import numpy; print(numpy.get_include())" 2>/dev/null || echo "/usr/lib/python3/dist-packages/numpy/core/include") \
       -DBUILD_opencv_java=OFF \
       -DBUILD_TESTS=OFF \
       -DBUILD_PERF_TESTS=OFF \
@@ -95,25 +103,14 @@ RUN --mount=type=cache,target=/root/.ccache \
     && echo "cv2" > "$OPENCV_DIST/RECORD" \
     && rm -rf /opt/opencv-build
 
-RUN python3 -c "\
-import cv2; \
-print('OpenCV version:', cv2.__version__); \
-info = cv2.getBuildInformation(); \
-for line in info.splitlines(): \
-    if any(k in line for k in ('CUDA', 'cuDNN', 'GStreamer', 'NEON', 'NVIDIA')): \
-        print(line); \
-n = cv2.cuda.getCudaEnabledDeviceCount();"
+RUN python3 -c "import cv2; print('OpenCV', cv2.__version__); assert 'CUDA' in cv2.getBuildInformation(), 'NOT built with CUDA'; print('CUDA build: OK')" \
+    && python3 -c "import cv2; [print(l) for l in cv2.getBuildInformation().splitlines() if any(k in l for k in ('CUDA','cuDNN','GStreamer','NEON','NVIDIA'))]"
 
 ENV UV_HTTP_TIMEOUT=300
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system \
     torch==${TORCH_VERSION} torchvision \
     --index-url https://download.pytorch.org/whl/cu130
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system \
-    "jax<0.4.30" "jaxlib<0.4.30" \
-    jaxlie jaxls jax-dataclasses
 
 WORKDIR /tmp/capx-install
 COPY pyproject.toml .
@@ -140,7 +137,7 @@ COPY capx/third_party/LIBERO-PRO capx/third_party/LIBERO-PRO
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=cache,target=/root/.ccache \
     mkdir -p capx && touch capx/__init__.py && \
-    uv venv /opt/venv-libero --python python${PYTHON_VERSION} && \
+    uv venv /opt/venv-libero --python python${PYTHON_VERSION} --system-site-packages && \
     uv pip install --python /opt/venv-libero/bin/python \
       --no-build-isolation \
       ".[libero,contactgraspnet]" || \
