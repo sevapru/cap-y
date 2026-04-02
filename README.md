@@ -98,6 +98,48 @@ sudo rm -f /usr/share/vulkan/icd.d/nvidia_icd.json
 
 See [docs/behavior-tasks.md](docs/behavior-tasks.md) for task details and expected baselines.
 
+### Docker (cap-y) -- Jetson Thor / NVIDIA GPU
+
+Pre-built container with everything CUDA-accelerated. No manual setup.
+
+```bash
+./build.sh                # auto-detects GPU, builds cap-y:latest
+docker compose -f docker-compose.capx.yml up -d   # start servers
+```
+
+Switch profiles without rebuilding:
+
+```bash
+CAPX_PROFILE=default  # SAM3 + GraspNet + PyRoKi
+CAPX_PROFILE=full     # + OWL-ViT + SAM2
+CAPX_PROFILE=minimal  # PyRoKi only
+```
+
+Run CUDA verification: `docker compose --profile test run cap-y-test`
+
+**What's accelerated:**
+
+| Module | Version | CUDA | Details |
+|--------|---------|------|---------|
+| OpenCV | 4.13 | cuDNN 9.12, cuBLAS, FAST_MATH | + GStreamer, NEON FP16/BF16/DOTPROD |
+| PyTorch | 2.11 cu130 | FlashAttention-4, sm_110 | aarch64 + x86_64 |
+| Open3D | 0.19+ | CUDA tensors, PyTorch ops | + RealSense, Open3D-ML, GUI |
+| JAX | 0.9.2 | cuda13 plugin | GPU IK via PyRoKi |
+| CuRobo | 0.7 | 5 CUDA extensions | collision-free trajectories |
+| ContactGraspNet | - | PointNet2 CUDA ops | 6-DOF grasp planning |
+| MuJoCo | 3.6 | EGL headless | LIBERO evaluation |
+| ROS 2 | Jazzy | - | rclpy + msg types (client-side) |
+
+**Portability** -- same Dockerfile, different GPU:
+
+```bash
+./build.sh --arch 11.0   # Jetson Thor
+./build.sh --arch 8.9    # RTX 4080
+./build.sh --arch 8.6    # RTX 3090
+```
+
+See [OPTIMISATIONS.md](OPTIMISATIONS.md) for flag details. See [CLAUDE.md](CLAUDE.md) for agent/developer docs.
+
 ### Optional extras
 
 ```bash
