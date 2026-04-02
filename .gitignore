@@ -8,8 +8,10 @@ __pycache__/
 venv/
 env/
 .env
+.env.*
 .openrouterkey
 .nvinferencekeys
+.huggingfacekey
 .capx_skills.json
 .pytest_cache/
 .ruff_cache/

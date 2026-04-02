@@ -1,0 +1,44 @@
+services:
+  capx-serving:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        CUDA_ARCH_BIN: "${CUDA_ARCH_BIN:-11.0}"
+        OPENCV_VERSION: "${OPENCV_VERSION:-4.13.0}"
+    image: capx-serving:latest
+    container_name: capx-serving
+    runtime: nvidia
+    shm_size: "8g"
+    init: true
+    ports:
+      - "8110:8110"    # OpenRouter LLM proxy
+      - "8113:8113"    # SAM2 (full profile)
+      - "8114:8114"    # SAM3
+      - "8115:8115"    # ContactGraspNet
+      - "8116:8116"    # PyRoKi
+      - "8117:8117"    # OWL-ViT (full profile)
+      - "8118:8118"    # CuRobo (custom profile)
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - HF_HOME=/data/huggingface
+      - CUDA_HOME=/usr/local/cuda
+      - CAPX_PROFILE=${CAPX_PROFILE:-default}
+      - CAPX_HOST=0.0.0.0
+      - MUJOCO_GL=egl
+    volumes:
+      - .:/workspace
+      - ${HOME}/.cache/huggingface:/data/huggingface
+      - capx-uv-cache:/root/.cache/uv
+      - capx-ccache:/root/.ccache
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8114/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+
+volumes:
+  capx-uv-cache:
+  capx-ccache:

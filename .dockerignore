@@ -1,0 +1,17 @@
+build/
+.venv*/
+capx/third_party/b1k/
+capx/third_party/verl/
+__pycache__/
+*.pyc
+.git/
+.ruff_cache/
+outputs/
+web-ui/node_modules/
+logs/
+.openrouterkey
+.huggingfacekey
+*.egg-info/
+.env
+.env.*
+!.env.example
