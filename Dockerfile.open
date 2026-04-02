@@ -1,0 +1,68 @@
+# capx-open: Commercially-safe container (Apache 2.0 / BSD / MIT only)
+#
+# Extends the capx-serving base with open-licensed robotics tools from
+# ARCHITECTURE.md. Safe for Sobaka eenmanszaak commercial deployments.
+#
+# Includes:
+#   - ROS 2 Jazzy (Apache 2.0)
+#   - Nav2 (Apache 2.0)
+#   - MoveIt 2 (Apache 2.0)
+#   - ros2_control (Apache 2.0)
+#   - PyRoKi (Apache 2.0) -- already in base
+#   - nvblox C++ core (Apache 2.0) -- NOT the Isaac ROS wrapper
+#   - Drake / GCS (BSD 3-Clause)
+#   - LiveKit Python SDK (Apache 2.0)
+#   - Open3D CUDA (Apache 2.0) -- already in base
+#   - OpenCV CUDA (Apache 2.0) -- already in base
+#   - PyTorch (BSD) -- already in base
+#
+# Does NOT include: cuMotion, cuRobo, cuTAMP, ScheduleStream,
+#   cuVSLAM, NITROS, Isaac ROS wrappers (all NVIDIA-licensed)
+
+ARG BASE_IMAGE=capx-serving:latest
+FROM ${BASE_IMAGE}
+
+ENV ROS_DISTRO=jazzy \
+    DEBIAN_FRONTEND=noninteractive
+
+# ROS 2 Jazzy base
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+      -o /usr/share/keyrings/ros-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
+      http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" \
+      > /etc/apt/sources.list.d/ros2.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
+      ros-${ROS_DISTRO}-ros-base \
+      ros-${ROS_DISTRO}-nav2-bringup \
+      ros-${ROS_DISTRO}-moveit \
+      ros-${ROS_DISTRO}-ros2-control \
+      ros-${ROS_DISTRO}-ros2-controllers \
+      ros-${ROS_DISTRO}-cyclonedds \
+      ros-${ROS_DISTRO}-rmw-cyclonedds-cpp \
+      python3-colcon-common-extensions \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+
+# nvblox C++ core (Apache 2.0) -- built from source, no Isaac ROS wrapper
+RUN --mount=type=cache,target=/root/.ccache \
+    git clone --depth 1 https://github.com/nvidia-isaac/nvblox.git /opt/nvblox && \
+    cd /opt/nvblox/nvblox && mkdir build && cd build && \
+    cmake .. \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr/local \
+      -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+      -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+    && make -j$(nproc) && make install && ldconfig \
+    && rm -rf /opt/nvblox
+
+# Drake (BSD 3-Clause) -- for GCS globally-optimal trajectory planning
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system drake
+
+# LiveKit Python SDK (Apache 2.0)
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system livekit livekit-agents livekit-plugins-silero
+
+# Source ROS 2 setup in entrypoint
+RUN echo '. /opt/ros/${ROS_DISTRO}/setup.bash' >> /root/.bashrc
