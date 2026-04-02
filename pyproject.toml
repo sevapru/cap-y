@@ -31,7 +31,7 @@ dependencies = [
   "tqdm",
   "h5py",
   "einops",
-  "decord",
+  "decord ; platform_machine == 'x86_64'",
   "pycocotools",
   "pyyaml",
   "omegaconf",
@@ -83,7 +83,7 @@ robosuite = [
   "robosuite"
 ]
 molmo = [
-  "torch==2.9.1",
+  "torch==2.9.1 ; platform_machine == 'x86_64'",
   "vllm==0.15.0 ; extra == 'molmo'",
   "tensorflow", 
   "accelerate"
@@ -105,8 +105,8 @@ ovdet = [
   "requests>=2.32",
 ]
 verl = [
-  "torch==2.8.0",
-  "vllm==0.11.0 ; extra == 'verl'",
+  "torch==2.8.0 ; platform_machine == 'x86_64'",
+  "vllm==0.11.0 ; extra == 'verl' and platform_machine == 'x86_64'",
   "verl",
   "datasets>=4.1.1",
   "pyarrow>=15",
@@ -116,6 +116,14 @@ verl = [
 ]
 
 [tool.uv.sources]
+# On aarch64 (Jetson Thor, CUDA 13.0), pull CUDA 13.0-native torch/torchvision wheels
+# from the pytorch.org cu130 index instead of the CPU-only PyPI builds.
+torch = [
+  { index = "pytorch-cu130", marker = "platform_machine == 'aarch64'" },
+]
+torchvision = [
+  { index = "pytorch-cu130", marker = "platform_machine == 'aarch64'" },
+]
 robosuite = [
   { path = "capx/third_party/robosuite", extra = "robosuite", editable = true},
   { path = "capx/third_party/libero_dependencies/robosuite", extra = "libero", editable = true },
@@ -128,9 +136,15 @@ contact_graspnet_pytorch = { path = "capx/third_party/contact_graspnet_pytorch",
 sam3 = { path = "capx/third_party/sam3", editable = true}
 nvidia-curobo = { path = "capx/third_party/curobo", editable = true}
 
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
 [tool.uv]
 environments = [
-    "sys_platform == 'linux' and platform_machine == 'x86_64'"
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
 ]
 override-dependencies = [
     "transformers<5.0",
@@ -140,7 +154,8 @@ override-dependencies = [
     "opencv-python-headless<4.13",
     "opencv-python ; sys_platform == 'never'",
     "jax<0.4.30",
-    "jaxlib<0.4.30"
+    "jaxlib<0.4.30",
+    "open3d<=0.18.0 ; platform_machine == 'aarch64'",
 ]
 conflicts = [
   [
