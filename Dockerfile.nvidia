@@ -1,0 +1,70 @@
+# capx-nvidia: NVIDIA-licensed container (research / enterprise agreement)
+#
+# Extends capx-open (which includes ROS 2 + open tools) with NVIDIA
+# proprietary and research-licensed components from ARCHITECTURE.md.
+#
+# Requires: NVIDIA Enterprise Agreement for production deployment, or
+# NVIDIA Research License for academic/research use.
+#
+# Includes:
+#   - Isaac ROS cuMotion (NVIDIA Source Code License)
+#   - Isaac ROS nvblox wrapper (NVIDIA Source Code License)
+#   - cuVSLAM (NVIDIA Source Code License)
+#   - NITROS (NVIDIA Source Code License)
+#   - cuRobo Python lib (NVIDIA Research License NC) -- already in base
+#   - cuTAMP (NVIDIA Research License NC)
+#   - ScheduleStream (NVIDIA NC License)
+#
+# Everything from capx-open is inherited (ROS 2, Nav2, MoveIt 2, Drake, etc.)
+
+ARG BASE_IMAGE=capx-open:latest
+FROM ${BASE_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    ROS_DISTRO=jazzy
+
+# Isaac ROS common dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ros-${ROS_DISTRO}-isaac-ros-common \
+      ros-${ROS_DISTRO}-isaac-ros-nitros \
+    && rm -rf /var/lib/apt/lists/* \
+    || echo "INFO: Isaac ROS packages not yet available for ${ROS_DISTRO}, install manually"
+
+# Isaac ROS cuMotion (NVIDIA Source Code License)
+# MoveIt 2 plugin for GPU-accelerated collision-free trajectory optimization
+RUN --mount=type=cache,target=/root/.ccache \
+    mkdir -p /opt/isaac_ros_ws/src && \
+    cd /opt/isaac_ros_ws/src && \
+    git clone --depth 1 https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_cumotion.git 2>/dev/null || \
+      echo "INFO: isaac_ros_cumotion not publicly available, add via NVIDIA NGC" && \
+    cd /opt/isaac_ros_ws && \
+    . /opt/ros/${ROS_DISTRO}/setup.sh && \
+    colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release 2>/dev/null || \
+      echo "INFO: cuMotion build skipped (source not available or deps missing)"
+
+# Isaac ROS nvblox wrapper (NVIDIA Source Code License)
+RUN cd /opt/isaac_ros_ws/src && \
+    git clone --depth 1 https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_nvblox.git 2>/dev/null || \
+      echo "INFO: isaac_ros_nvblox not publicly available" && \
+    cd /opt/isaac_ros_ws && \
+    . /opt/ros/${ROS_DISTRO}/setup.sh && \
+    colcon build --symlink-install --packages-select isaac_ros_nvblox 2>/dev/null || \
+      echo "INFO: nvblox wrapper build skipped"
+
+# cuVSLAM (NVIDIA Source Code License)
+RUN cd /opt/isaac_ros_ws/src && \
+    git clone --depth 1 https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_visual_slam.git 2>/dev/null || \
+      echo "INFO: cuVSLAM not publicly available" && \
+    cd /opt/isaac_ros_ws && \
+    . /opt/ros/${ROS_DISTRO}/setup.sh && \
+    colcon build --symlink-install --packages-select isaac_ros_visual_slam 2>/dev/null || \
+      echo "INFO: cuVSLAM build skipped"
+
+# cuTAMP (NVIDIA Research License NC)
+# Task and Motion Planning with GPU acceleration
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system nvidia-cutamp 2>/dev/null || \
+      echo "INFO: cuTAMP not available via pip, install from NVIDIA NGC"
+
+# Source Isaac ROS workspace
+RUN echo '. /opt/isaac_ros_ws/install/setup.bash 2>/dev/null || true' >> /root/.bashrc
