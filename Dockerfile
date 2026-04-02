@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev \
     libegl1 libgl1 libglvnd-dev \
     libgtk-3-dev \
-    curl wget unzip \
+    curl wget unzip file \
     && rm -rf /var/lib/apt/lists/*
 
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 && \
@@ -47,7 +47,11 @@ RUN cd /opt/opencv-build && \
       opencv/modules/dnn/src/cuda4dnn/primitives/normalize_bbox.hpp && \
     sed -i 's|nms_iou_threshold > 0|(float)nms_iou_threshold > 0.0f|' \
       opencv/modules/dnn/src/cuda4dnn/primitives/region.hpp
-
+# ---------------------------------------------------------------------------
+# OpenCV from source
+# Build with CUDA on Jetson
+# https://docs.opencv.org/4.13.0/d6/d00/tutorial_py_root.html
+# ---------------------------------------------------------------------------
 RUN --mount=type=cache,target=/root/.ccache \
     cd /opt/opencv-build && mkdir -p build && cd build && \
     cmake -G Ninja ../opencv \
@@ -112,6 +116,76 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     torch==${TORCH_VERSION} torchvision \
     --index-url https://download.pytorch.org/whl/cu130
 
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system hatchling setuptools wheel scikit-build-core yapf
+
+# ---------------------------------------------------------------------------
+# Open3D from source
+# Build with CUDA on Jetson, GUI on (full OpenGL available)
+# https://www.open3d.org/docs/release/arm.html
+# ---------------------------------------------------------------------------
+# Use main branch: v0.19.0 fails with CUDA 13.0 due to outdated stdgpu
+# Fixed in main via PRs #7083, #7398 (issues #7376, #7397)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+    libusb-1.0-0-dev liblzf-dev libfmt-dev pybind11-dev \
+    clang libc++-dev libc++abi-dev libomp-dev libglu1-mesa-dev libssl-dev \
+    libcurl4-openssl-dev \
+    gfortran nasm apt-transport-https \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -sSf https://librealsense.realsenseai.com/Debian/librealsenseai.asc | \
+       gpg --dearmor > /etc/apt/keyrings/librealsenseai.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/librealsenseai.gpg] https://librealsense.realsenseai.com/Debian/apt-repo noble main" > \
+       /etc/apt/sources.list.d/librealsense.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends librealsense2-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 --branch main --recursive https://github.com/isl-org/Open3D.git /opt/open3d && \
+    git clone --depth 1 --branch main https://github.com/isl-org/Open3D-ML.git /opt/open3d/Open3D-ML
+
+RUN --mount=type=cache,target=/root/.ccache \
+    export TORCH_CUDA_ARCH_LIST="${CUDA_ARCH_BIN}" && \
+    cd /opt/open3d && \
+    sed -i '/set(TORCH_CUDA_ARCH_LIST "")/,/endforeach()/c\        set(TORCH_CUDA_ARCH_LIST "$ENV{TORCH_CUDA_ARCH_LIST}")' 3rdparty/cmake/FindPytorch.cmake && \
+    mkdir -p build && cd build && \
+    cmake .. \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr/local \
+      -DCMAKE_C_COMPILER=clang \
+      -DCMAKE_CXX_COMPILER=clang++ \
+      -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+      -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+      -DCMAKE_CXX_STANDARD=17 \
+      -DCMAKE_CUDA_STANDARD=17 \
+      -DCMAKE_CUDA_FLAGS="--generate-code=arch=compute_$(echo ${CUDA_ARCH_BIN} | tr -d '.'),code=sm_$(echo ${CUDA_ARCH_BIN} | tr -d '.')" \
+      -DTORCH_CUDA_ARCH_LIST="${CUDA_ARCH_BIN}" \
+      -DBUILD_CUDA_MODULE=ON \
+      -DBUILD_GUI=ON \
+      -DBUILD_SHARED_LIBS=ON \
+      -DENABLE_HEADLESS_RENDERING=OFF \
+      -DBUILD_WEBRTC=OFF \
+      -DBUILD_LIBREALSENSE=ON \
+      -DBUILD_PYTORCH_OPS=ON \
+      -DBUILD_TENSORFLOW_OPS=OFF \
+      -DBUNDLE_OPEN3D_ML=ON \
+      -DOPEN3D_ML_ROOT=/opt/open3d/Open3D-ML \
+      -DUSE_BLAS=ON \
+      -DUSE_SYSTEM_CURL=ON \
+      -DBUILD_UNIT_TESTS=OFF \
+      -DBUILD_BENCHMARKS=OFF \
+      -DBUILD_EXAMPLES=OFF \
+      -DPYTHON_EXECUTABLE=/usr/bin/python3.12 \
+    && make -j$(nproc) \
+    && make install-pip-package -j$(nproc) \
+    && ldconfig \
+    && rm -rf /opt/open3d
+
+RUN python3 -c "import open3d as o3d; print('Open3D', o3d.__version__); print('CUDA:', o3d.core.cuda.is_available())"
+
+# ---------------------------------------------------------------------------
+# cap-x dependencies + CUDA extensions (CuRobo, PointNet2)
+# ---------------------------------------------------------------------------
 WORKDIR /tmp/capx-install
 COPY pyproject.toml .
 COPY capx/third_party/sam3 capx/third_party/sam3
@@ -121,7 +195,9 @@ COPY capx/third_party/curobo capx/third_party/curobo
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=cache,target=/root/.ccache \
     mkdir -p capx && touch capx/__init__.py && \
+    echo 'open3d ; sys_platform == "never"' > /tmp/open3d-skip.txt && \
     uv pip install --system --no-build-isolation \
+      --override /tmp/open3d-skip.txt \
       ".[contactgraspnet,curobo]"
 
 RUN rm -rf /tmp/capx-install
