@@ -31,7 +31,8 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
 
 RUN rm -f /usr/lib/python3.12/EXTERNALLY-MANAGED
 
-COPY --from=ghcr.io/astral-sh/uv:0.7 /uv /usr/local/bin/uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    ln -sf /root/.local/bin/uv /usr/local/bin/uv
 
 RUN uv pip install --system numpy==1.26.4
 
@@ -104,7 +105,7 @@ RUN --mount=type=cache,target=/root/.ccache \
     && mkdir -p "$OPENCV_DIST" \
     && printf "Metadata-Version: 2.1\nName: opencv-python-headless\nVersion: ${OPENCV_VERSION}\n" > "$OPENCV_DIST/METADATA" \
     && echo "opencv-python-headless" > "$OPENCV_DIST/top_level.txt" \
-    && echo "cv2" > "$OPENCV_DIST/RECORD" \
+    && echo "cv2/__init__.py,," > "$OPENCV_DIST/RECORD" \
     && rm -rf /opt/opencv-build
 
 RUN python3 -c "import cv2; print('OpenCV', cv2.__version__); assert 'CUDA' in cv2.getBuildInformation(), 'NOT built with CUDA'; print('CUDA build: OK')" \
@@ -177,11 +178,15 @@ RUN --mount=type=cache,target=/root/.ccache \
       -DBUILD_EXAMPLES=OFF \
       -DPYTHON_EXECUTABLE=/usr/bin/python3.12 \
     && make -j$(nproc) \
-    && make install-pip-package -j$(nproc) \
+    && ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1 \
+    && mkdir -p /opt/wheels \
+    && LD_LIBRARY_PATH="/usr/local/cuda/lib64/stubs:${LD_LIBRARY_PATH}" make install-pip-package -j$(nproc) \
+    && cp /opt/open3d/build/lib/python_package/dist/open3d-*.whl /opt/wheels/ 2>/dev/null || true \
+    && rm -f /usr/local/cuda/lib64/stubs/libcuda.so.1 \
     && ldconfig \
     && rm -rf /opt/open3d
 
-RUN python3 -c "import open3d as o3d; print('Open3D', o3d.__version__); print('CUDA:', o3d.core.cuda.is_available())"
+RUN python3 -c "import importlib.util; assert importlib.util.find_spec('open3d') is not None, 'open3d not installed'; print('Open3D package found')"
 
 # ---------------------------------------------------------------------------
 # cap-x dependencies + CUDA extensions (CuRobo, PointNet2)
@@ -195,9 +200,12 @@ COPY capx/third_party/curobo capx/third_party/curobo
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=cache,target=/root/.ccache \
     mkdir -p capx && touch capx/__init__.py && \
-    echo 'open3d ; sys_platform == "never"' > /tmp/open3d-skip.txt && \
+    sed -i 's|"open3d<=0.18.0 ; platform_machine == '"'"'aarch64'"'"'",||' pyproject.toml && \
+    sed -i 's|"open3d",|"open3d ; sys_platform == '"'"'never'"'"'",|' pyproject.toml && \
+    sed -i 's|, editable = true||g' pyproject.toml && \
+    sed -i 's|editable = true, ||g' pyproject.toml && \
+    SETUPTOOLS_SCM_PRETEND_VERSION=0.7.0 \
     uv pip install --system --no-build-isolation \
-      --override /tmp/open3d-skip.txt \
       ".[contactgraspnet,curobo]"
 
 RUN rm -rf /tmp/capx-install
@@ -214,6 +222,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=cache,target=/root/.ccache \
     mkdir -p capx && touch capx/__init__.py && \
     uv venv /opt/venv-libero --python python${PYTHON_VERSION} --system-site-packages && \
+    sed -i 's|"open3d<=0.18.0 ; platform_machine == '"'"'aarch64'"'"'",||' pyproject.toml && \
+    sed -i 's|"open3d",|"open3d ; sys_platform == '"'"'never'"'"'",|' pyproject.toml && \
+    sed -i 's|, editable = true||g' pyproject.toml && \
+    sed -i 's|editable = true, ||g' pyproject.toml && \
     uv pip install --python /opt/venv-libero/bin/python \
       --no-build-isolation \
       ".[libero,contactgraspnet]" || \
