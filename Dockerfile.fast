@@ -1,0 +1,317 @@
+# ==============================================================================
+# cap-y: Jetson-optimized AI Serving Container
+# Base: NVIDIA CUDA 13.0 + cuDNN (multi-arch: arm64 Jetson Thor / amd64 desktop)
+# Image name: cap-y:latest
+# ==============================================================================
+
+ARG BASE_IMAGE=nvcr.io/nvidia/cuda:13.0.0-cudnn-devel-ubuntu24.04
+FROM ${BASE_IMAGE}
+
+# --- Build Configuration ---------------------------------------------------
+# CUDA_ARCH: GPU compute capability in dotted format (matches nvidia-smi output).
+#   11.0 = Jetson Thor, 8.9 = RTX 4080, 8.6 = RTX 3090
+#   build.sh auto-detects this via nvidia-smi.
+ARG CUDA_ARCH=11.0
+ARG OPENCV_VERSION=4.13.0
+ARG PYTHON_VERSION=3.12
+ARG TORCH_VERSION=2.11.0
+# Open3D built from main: v0.19.0 fails with CUDA 13.0 (stdgpu issue #7376)
+ARG OPEN3D_BRANCH=main
+
+# --- Runtime Environment ---------------------------------------------------
+ENV DEBIAN_FRONTEND=noninteractive \
+    CUDA_HOME=/usr/local/cuda \
+    TORCH_CUDA_ARCH_LIST="${CUDA_ARCH}" \
+    CCACHE_DIR=/root/.ccache \
+    PATH="/usr/local/cuda/bin:${PATH}" \
+    LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}" \
+    UV_HTTP_TIMEOUT=300
+
+# ==============================================================================
+# [1/9] System dependencies (single apt-get layer)
+# Combines base build tools + OpenCV deps + Open3D deps + RealSense.
+# One layer saves ~500MB vs two separate apt-get runs.
+# ==============================================================================
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # -- Python & core build tools --
+    python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv python3-pip \
+    build-essential cmake ninja-build git ccache pkg-config \
+    curl wget unzip file \
+    # -- OpenCV: multimedia I/O --
+    libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+    libavcodec-dev libavformat-dev libswscale-dev \
+    libjpeg-dev libpng-dev libtiff-dev libwebp-dev libv4l-dev \
+    # -- OpenCV: math & display --
+    libeigen3-dev libtbb-dev libgtk-3-dev \
+    # -- OpenGL / EGL (shared by OpenCV + Open3D GUI) --
+    libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev \
+    libegl1 libgl1 libglvnd-dev libglu1-mesa-dev \
+    # -- Open3D: X11 + USB + compression --
+    libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+    libusb-1.0-0-dev liblzf-dev libfmt-dev pybind11-dev \
+    # -- Open3D: Clang required by Filament rendering engine --
+    clang libc++-dev libc++abi-dev libomp-dev \
+    # -- Open3D: network + SSL --
+    libssl-dev libcurl4-openssl-dev \
+    # -- Open3D: Fortran for BLAS, nasm for AOM codec --
+    gfortran nasm apt-transport-https \
+    # -- RealSense SDK for Open3D --
+    && mkdir -p /etc/apt/keyrings \
+    && curl -sSf https://librealsense.realsenseai.com/Debian/librealsenseai.asc | \
+       gpg --dearmor > /etc/apt/keyrings/librealsenseai.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/librealsenseai.gpg] https://librealsense.realsenseai.com/Debian/apt-repo noble main" > \
+       /etc/apt/sources.list.d/librealsense.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends librealsense2-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# ==============================================================================
+# [2/9] Python setup + uv package manager
+# PEP 668 EXTERNALLY-MANAGED marker blocks system-wide pip; remove it for Docker.
+# ==============================================================================
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 && \
+    update-alternatives --install /usr/bin/python  python  /usr/bin/python${PYTHON_VERSION} 1 && \
+    rm -f /usr/lib/python${PYTHON_VERSION}/EXTERNALLY-MANAGED && \
+    curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    ln -sf /root/.local/bin/uv /usr/local/bin/uv && \
+    uv pip install --system "numpy>=2.0,<3"
+
+# ==============================================================================
+# [3/9] OpenCV 4.13 with CUDA (from source)
+# No pre-built aarch64 wheel with CUDA DNN + cuBLAS + cuDNN + GStreamer.
+# FP16 patches from jetson-containers fix implicit double→half comparisons.
+# ==============================================================================
+RUN mkdir -p /opt/opencv-build && cd /opt/opencv-build && \
+    git clone --depth 1 --branch ${OPENCV_VERSION} https://github.com/opencv/opencv.git && \
+    git clone --depth 1 --branch ${OPENCV_VERSION} https://github.com/opencv/opencv_contrib.git
+
+# cuDNN version header symlink (layout varies across base images)
+RUN ln -sfnv /usr/include/$(uname -m)-linux-gnu/cudnn_version_v*.h \
+    /usr/include/$(uname -m)-linux-gnu/cudnn_version.h 2>/dev/null || true
+
+# FP16 half-cast patches: (float)weight != 1.0f instead of weight != 1.0
+RUN cd /opt/opencv-build && \
+    sed -i 's|weight != 1.0|(float)weight != 1.0f|' \
+      opencv/modules/dnn/src/cuda4dnn/primitives/normalize_bbox.hpp && \
+    sed -i 's|nms_iou_threshold > 0|(float)nms_iou_threshold > 0.0f|' \
+      opencv/modules/dnn/src/cuda4dnn/primitives/region.hpp
+
+RUN --mount=type=cache,target=/root/.ccache \
+    cd /opt/opencv-build && mkdir -p build && cd build && \
+    cmake -G Ninja ../opencv \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr/local \
+      -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+      -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+      -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache \
+      -DOPENCV_EXTRA_MODULES_PATH=../opencv_contrib/modules \
+      -DWITH_CUDA=ON \
+      -DCUDA_ARCH_BIN="${CUDA_ARCH}" \
+      -DCUDA_ARCH_PTX= \
+      -DCUDA_FAST_MATH=ON \
+      -DWITH_CUBLAS=ON \
+      -DWITH_CUDNN=ON \
+      -DOPENCV_DNN_CUDA=ON \
+      -DCUDNN_INCLUDE_DIR=/usr/include/$(uname -m)-linux-gnu \
+      -DWITH_EIGEN=ON \
+      -DEIGEN_INCLUDE_PATH=/usr/include/eigen3 \
+      -DWITH_TBB=ON \
+      -DWITH_GSTREAMER=ON \
+      -DWITH_FFMPEG=ON \
+      -DWITH_V4L=ON \
+      -DWITH_LIBV4L=ON \
+      -DWITH_OPENGL=ON \
+      -DOpenGL_GL_PREFERENCE=GLVND \
+      -DWITH_GTK=ON \
+      -DOPENCV_ENABLE_NONFREE=ON \
+      -DOPENCV_GENERATE_PKGCONFIG=ON \
+      -DWITH_OPENCL=OFF \
+      -DWITH_IPP=OFF \
+      -DBUILD_opencv_rgbd=OFF \
+      -DBUILD_opencv_python2=OFF \
+      -DBUILD_opencv_python3=ON \
+      -DPYTHON3_EXECUTABLE=/usr/bin/python${PYTHON_VERSION} \
+      -DPYTHON3_INCLUDE_DIR=$(python${PYTHON_VERSION} -c "from sysconfig import get_paths; print(get_paths()['include'])") \
+      -DPYTHON3_LIBRARY=$(find /usr/lib -name 'libpython${PYTHON_VERSION}*.so*' | head -1) \
+      -DPYTHON3_PACKAGES_PATH=/usr/local/lib/python${PYTHON_VERSION}/dist-packages \
+      -DPYTHON3_NUMPY_INCLUDE_DIRS=$(python${PYTHON_VERSION} -c "import numpy; print(numpy.get_include())" 2>/dev/null || echo "/usr/lib/python3/dist-packages/numpy/core/include") \
+      -DBUILD_opencv_java=OFF \
+      -DBUILD_TESTS=OFF \
+      -DBUILD_PERF_TESTS=OFF \
+      -DBUILD_EXAMPLES=OFF \
+      -DBUILD_DOCS=OFF \
+      $([ "$(uname -m)" = "aarch64" ] && echo "-DENABLE_NEON=ON") \
+    && cmake --build . --parallel $(nproc) \
+    && cmake --install . \
+    && ldconfig \
+    # Dummy dist-info prevents uv from shadowing our CUDA build with a PyPI CPU wheel
+    && OPENCV_DIST="/usr/local/lib/python${PYTHON_VERSION}/dist-packages/opencv_python_headless-${OPENCV_VERSION}.dist-info" \
+    && mkdir -p "$OPENCV_DIST" \
+    && printf "Metadata-Version: 2.1\nName: opencv-python-headless\nVersion: ${OPENCV_VERSION}\n" > "$OPENCV_DIST/METADATA" \
+    && echo "opencv-python-headless" > "$OPENCV_DIST/top_level.txt" \
+    && echo "cv2/__init__.py,," > "$OPENCV_DIST/RECORD" \
+    && rm -rf /opt/opencv-build
+
+RUN python3 -c "import cv2; print('OpenCV', cv2.__version__); assert 'CUDA' in cv2.getBuildInformation(), 'NOT built with CUDA'; print('CUDA build: OK')" \
+    && python3 -c "import cv2; [print(l) for l in cv2.getBuildInformation().splitlines() if any(k in l for k in ('CUDA','cuDNN','GStreamer','NEON','NVIDIA'))]"
+
+# ==============================================================================
+# [4/9] PyTorch 2.11 + cu130
+# ==============================================================================
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system \
+    torch==${TORCH_VERSION} torchvision \
+    --index-url https://download.pytorch.org/whl/cu130
+
+# ==============================================================================
+# [5/9] Build tools for native extensions
+# hatchling/setuptools needed before --no-build-isolation installs (CuRobo, PointNet2).
+# yapf required by Open3D's generate_torch_ops_wrapper.py.
+# ==============================================================================
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system hatchling setuptools wheel scikit-build-core yapf
+
+# ==============================================================================
+# [6/9] Open3D with CUDA (from source, Clang)
+# Filament rendering engine requires Clang >= 7.
+# System curl avoids BoringSSL vs system OpenSSL conflict.
+# ==============================================================================
+RUN git clone --depth 1 --branch ${OPEN3D_BRANCH} --recursive https://github.com/isl-org/Open3D.git /opt/open3d && \
+    git clone --depth 1 --branch main https://github.com/isl-org/Open3D-ML.git /opt/open3d/Open3D-ML
+
+# libcuda.so.1 stub: Open3D pip packaging links against it, but no GPU at build time
+RUN ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1
+
+RUN --mount=type=cache,target=/root/.ccache \
+    cd /opt/open3d && \
+    # FindPytorch.cmake arch conversion breaks for 3-digit CCs (110 -> "1.1+PTX0").
+    # Patch: read TORCH_CUDA_ARCH_LIST from env directly instead of parsing.
+    sed -i '/set(TORCH_CUDA_ARCH_LIST "")/,/endforeach()/c\        set(TORCH_CUDA_ARCH_LIST "$ENV{TORCH_CUDA_ARCH_LIST}")' 3rdparty/cmake/FindPytorch.cmake && \
+    mkdir -p build && cd build && \
+    cmake .. \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr/local \
+      -DCMAKE_C_COMPILER=clang \
+      -DCMAKE_CXX_COMPILER=clang++ \
+      -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+      -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+      -DCMAKE_CXX_STANDARD=17 \
+      -DCMAKE_CUDA_STANDARD=17 \
+      -DCMAKE_CUDA_FLAGS="--generate-code=arch=compute_$(echo ${CUDA_ARCH} | tr -d '.'),code=sm_$(echo ${CUDA_ARCH} | tr -d '.')" \
+      -DTORCH_CUDA_ARCH_LIST="${CUDA_ARCH}" \
+      -DBUILD_CUDA_MODULE=ON \
+      -DBUILD_GUI=ON \
+      -DBUILD_SHARED_LIBS=ON \
+      -DENABLE_HEADLESS_RENDERING=OFF \
+      -DBUILD_WEBRTC=OFF \
+      -DBUILD_LIBREALSENSE=ON \
+      -DBUILD_PYTORCH_OPS=ON \
+      -DBUILD_TENSORFLOW_OPS=OFF \
+      -DBUNDLE_OPEN3D_ML=ON \
+      -DOPEN3D_ML_ROOT=/opt/open3d/Open3D-ML \
+      -DUSE_BLAS=ON \
+      -DUSE_SYSTEM_CURL=ON \
+      -DBUILD_UNIT_TESTS=OFF \
+      -DBUILD_BENCHMARKS=OFF \
+      -DBUILD_EXAMPLES=OFF \
+      -DPYTHON_EXECUTABLE=/usr/bin/python${PYTHON_VERSION} \
+    && make -j$(nproc) \
+    && LD_LIBRARY_PATH="/usr/local/cuda/lib64/stubs:${LD_LIBRARY_PATH}" make install-pip-package -j$(nproc) \
+    && mkdir -p /opt/wheels \
+    && (cp /opt/open3d/build/lib/python_package/dist/open3d-*.whl /opt/wheels/ 2>/dev/null || true) \
+    && ldconfig \
+    && rm -rf /opt/open3d
+
+# Clean up the stub now that Open3D pip package is installed
+RUN rm -f /usr/local/cuda/lib64/stubs/libcuda.so.1
+
+RUN python3 -c "import importlib.util; assert importlib.util.find_spec('open3d') is not None, 'open3d not installed'"
+
+# ==============================================================================
+# [7/9] cap-x Python dependencies + CUDA extensions (CuRobo, PointNet2)
+# patch-pyproject.sh neutralizes entries that conflict with our source builds:
+#   - open3d, jax, jaxlib: already installed, no PyPI aarch64 wheels
+#   - numpy pin: removed so torch's numpy dep resolves freely
+#   - editable = true: meaningless in Docker build context
+# ==============================================================================
+COPY docker/patch-pyproject.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/patch-pyproject.sh
+
+WORKDIR /tmp/capx-install
+COPY pyproject.toml .
+COPY capx/third_party/sam3 capx/third_party/sam3
+COPY capx/third_party/contact_graspnet_pytorch capx/third_party/contact_graspnet_pytorch
+COPY capx/third_party/curobo capx/third_party/curobo
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.ccache \
+    mkdir -p capx && touch capx/__init__.py && \
+    patch-pyproject.sh pyproject.toml && \
+    SETUPTOOLS_SCM_PRETEND_VERSION=0.7.0 \
+    uv pip install --system --no-build-isolation \
+      ".[contactgraspnet,curobo]"
+
+RUN rm -rf /tmp/capx-install
+
+# ==============================================================================
+# [8/9] LIBERO evaluation venv
+# Separate venv due to robosuite version conflict with the serving stack.
+# --system-site-packages inherits CUDA OpenCV, PyTorch, Open3D from system.
+# ==============================================================================
+WORKDIR /tmp/libero-install
+COPY pyproject.toml .
+COPY capx/third_party/sam3 capx/third_party/sam3
+COPY capx/third_party/contact_graspnet_pytorch capx/third_party/contact_graspnet_pytorch
+COPY capx/third_party/curobo capx/third_party/curobo
+COPY capx/third_party/libero_dependencies capx/third_party/libero_dependencies
+COPY capx/third_party/LIBERO-PRO capx/third_party/LIBERO-PRO
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.ccache \
+    mkdir -p capx && touch capx/__init__.py && \
+    uv venv /opt/venv-libero --python python${PYTHON_VERSION} --system-site-packages && \
+    patch-pyproject.sh pyproject.toml && \
+    uv pip install --python /opt/venv-libero/bin/python \
+      --no-build-isolation \
+      ".[libero,contactgraspnet]" || \
+    echo "WARNING: LIBERO venv install had errors (may need runtime install)"
+
+RUN rm -rf /tmp/libero-install
+
+# ==============================================================================
+# [9/9] JAX with CUDA 13 + Runtime setup
+# Installed last to ensure numpy remains >= 2.0 (OpenCV built against numpy 2.x).
+# ==============================================================================
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system "jax[cuda13]"
+
+# ==============================================================================
+# [9.5/9] ROS 2 client libraries (rclpy + message types)
+# Only the client side -- no full ROS stack. Enough to send action goals
+# and subscribe to topics from cap-y serving code. Full ROS goes in cap-y-open.
+# ==============================================================================
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | \
+    gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
+    http://packages.ros.org/ros2/ubuntu noble main" > /etc/apt/sources.list.d/ros2.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
+      ros-jazzy-rclpy \
+      ros-jazzy-action-msgs \
+      ros-jazzy-nav-msgs \
+      ros-jazzy-trajectory-msgs \
+      ros-jazzy-geometry-msgs \
+      ros-jazzy-sensor-msgs \
+      ros-jazzy-std-msgs \
+    && rm -rf /var/lib/apt/lists/* \
+    && echo '. /opt/ros/jazzy/setup.bash' >> /root/.bashrc
+
+ENV ROS_DISTRO=jazzy
+
+WORKDIR /workspace
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 8110 8113 8114 8115 8116 8117 8118
+
+ENTRYPOINT ["/entrypoint.sh"]

@@ -25,5 +25,7 @@ if [[ -z "$ARCH" ]]; then
   echo "Detected GPU compute capability: ${ARCH}"
 fi
 
-echo "Building capx-serving image with CUDA_ARCH_BIN=${ARCH}"
-docker compose -f "${COMPOSE_FILE}" build --build-arg CUDA_ARCH_BIN="${ARCH}"
+echo "Building capx-serving image with CUDA_ARCH=${ARCH}"
+docker compose -f "${COMPOSE_FILE}" build \
+  --build-arg CUDA_ARCH_BIN="${ARCH}" \
+  --build-arg CUDA_ARCH="${ARCH}"

@@ -49,3 +49,5 @@ wandb/
 *.ico
 *.webp
 check.md
+last_step.md
+.claude

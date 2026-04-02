@@ -19,7 +19,7 @@
 # Does NOT include: cuMotion, cuRobo, cuTAMP, ScheduleStream,
 #   cuVSLAM, NITROS, Isaac ROS wrappers (all NVIDIA-licensed)
 
-ARG BASE_IMAGE=capx-serving:latest
+ARG BASE_IMAGE=cap-y:latest
 FROM ${BASE_IMAGE}
 
 ENV ROS_DISTRO=jazzy \

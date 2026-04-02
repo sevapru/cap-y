@@ -2,12 +2,12 @@ services:
   capx-serving:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.fast
       args:
-        CUDA_ARCH_BIN: "${CUDA_ARCH_BIN:-11.0}"
+        CUDA_ARCH: "${CUDA_ARCH:-11.0}"
         OPENCV_VERSION: "${OPENCV_VERSION:-4.13.0}"
-    image: capx-serving:latest
-    container_name: capx-serving
+    image: cap-y:latest
+    container_name: cap-y
     runtime: nvidia
     shm_size: "8g"
     init: true
@@ -40,8 +40,8 @@ services:
     restart: unless-stopped
 
   capx-test:
-    image: capx-serving:latest
-    container_name: capx-test
+    image: cap-y:latest
+    container_name: cap-y-test
     runtime: nvidia
     profiles: ["test"]
     volumes:
