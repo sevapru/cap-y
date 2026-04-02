@@ -214,14 +214,15 @@ def test_jax():
         devices = jax.devices()
         device_types = set(d.platform for d in devices)
 
-        if "gpu" in device_types:
-            report("PASS", f"JAX {jax.__version__}", f"GPU accelerated: {devices}")
+        if "gpu" in device_types or "cuda" in device_types:
+            gpu_devices = [d for d in devices if d.platform in ("gpu", "cuda")]
+            report("PASS", f"JAX {jax.__version__}", f"GPU accelerated, {len(gpu_devices)} CUDA device(s)")
         else:
-            report("INFO", f"JAX {jax.__version__}",
-                   f"CPU only (expected: jax<0.4.30 has no CUDA 13.0 aarch64 wheels)")
+            report("FAIL", f"JAX {jax.__version__}",
+                   f"CPU only -- expected GPU with jax[cuda13]. Devices: {devices}")
 
     except Exception as e:
-        report("INFO", "JAX", f"Not installed or import failed: {e}")
+        report("FAIL", "JAX", f"Not installed or import failed: {e}")
 
 
 def test_libero_venv():

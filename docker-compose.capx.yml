@@ -39,6 +39,17 @@ services:
       start_period: 120s
     restart: unless-stopped
 
+  capx-test:
+    image: capx-serving:latest
+    container_name: capx-test
+    runtime: nvidia
+    profiles: ["test"]
+    volumes:
+      - .:/workspace
+    environment:
+      - MUJOCO_GL=egl
+    command: python /workspace/scripts/test_cuda_acceleration.py
+
 volumes:
   capx-uv-cache:
   capx-ccache:

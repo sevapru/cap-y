@@ -202,6 +202,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     mkdir -p capx && touch capx/__init__.py && \
     sed -i 's|"open3d<=0.18.0 ; platform_machine == '"'"'aarch64'"'"'",||' pyproject.toml && \
     sed -i 's|"open3d",|"open3d ; sys_platform == '"'"'never'"'"'",|' pyproject.toml && \
+    sed -i 's|"jax<0.4.30",||' pyproject.toml && \
+    sed -i 's|"jaxlib<0.4.30",||' pyproject.toml && \
+    sed -i 's|"numpy==1.26.4",||' pyproject.toml && \
     sed -i 's|, editable = true||g' pyproject.toml && \
     sed -i 's|editable = true, ||g' pyproject.toml && \
     SETUPTOOLS_SCM_PRETEND_VERSION=0.7.0 \
@@ -224,6 +227,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv venv /opt/venv-libero --python python${PYTHON_VERSION} --system-site-packages && \
     sed -i 's|"open3d<=0.18.0 ; platform_machine == '"'"'aarch64'"'"'",||' pyproject.toml && \
     sed -i 's|"open3d",|"open3d ; sys_platform == '"'"'never'"'"'",|' pyproject.toml && \
+    sed -i 's|"jax<0.4.30",||' pyproject.toml && \
+    sed -i 's|"jaxlib<0.4.30",||' pyproject.toml && \
+    sed -i 's|"numpy==1.26.4",||' pyproject.toml && \
     sed -i 's|, editable = true||g' pyproject.toml && \
     sed -i 's|editable = true, ||g' pyproject.toml && \
     uv pip install --python /opt/venv-libero/bin/python \
@@ -232,6 +238,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     echo "WARNING: LIBERO venv install had errors (may need runtime install)"
 
 RUN rm -rf /tmp/libero-install
+
+# JAX with CUDA 13 -- installed last so numpy upgrade is not reverted
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system "jax[cuda13]"
 
 WORKDIR /workspace
 
