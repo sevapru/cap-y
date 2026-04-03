@@ -56,9 +56,20 @@ cd cap-y/docker
 docker compose -f docker-compose.capx.yml up -d --build
 ```
 
-Override build args via environment:
+Build args:
 ```bash
-CUDA_ARCH=8.9 docker compose -f docker-compose.capx.yml build    # RTX 4080
+# Custom GPU arch
+docker compose -f docker-compose.capx.yml build --build-arg CUDA_ARCH_BIN=8.9 # RTX 4080
+
+# Add LIBERO evaluation venv (robosuite/MuJoCo)
+docker compose -f docker-compose.capx.yml build --build-arg WITH_LIBERO=1
+
+# Clean build caches for smaller image (prod)
+docker compose -f docker-compose.capx.yml build --build-arg CLEAN_CACHES=1
+
+# Full image with LIBERO + clean caches (publishing)
+docker compose -f docker-compose.capx.yml build \
+  --build-arg WITH_LIBERO=1 --build-arg CLEAN_CACHES=1
 ```
 
 ### Start Perception Servers
@@ -115,19 +126,20 @@ There is, mainly, no on-time cu130 support for containers and, as I would tell y
 
 Index: [wheels.sobaka.dev](https://wheels.sobaka.dev)
 
-These don't exist on PyPI for Jetson Thor. We built them so you don't have to (you're welcome 🎁):
+Pre-built for **Jetson Thor aarch64, Python 3.12, CUDA 13.0, SM 110**. None of these exist on PyPI 🎁
 
 ```bash
 uv pip install --extra-index-url https://wheels.sobaka.dev/simple/ \
-  opencv-python-headless open3d jaxlib jax-cuda13-plugin
+  jaxlib jax-cuda13-plugin jax-cuda13-pjrt
 ```
 
+| Package | Build time saved | What's special |
+|---------|-----------------|----------------|
+| jaxlib 0.9.2 | ~2 hours | SM 110 native kernels, no PTX JIT |
+| jax-cuda13-plugin | (same build) | SM 110 pre-compiled XLA |
+| jax-cuda13-pjrt | (same build) | CUDA 13 runtime |
 
-| Package     | What you'd spend building it | What you spend with us |
-| ----------- | ---------------------------- | ---------------------- |
-| OpenCV CUDA | ~1 hour                      | `pip install` & ☕     |
-| Open3D CUDA | ~40 min                      | `pip install` & ☕     |
-| JAX SM 110  | ~2 hours                     | `pip install` & ☕     |
+OpenCV CUDA and Open3D CUDA are available via the `cap-y` container (cmake/source builds don't produce portable wheels).
  
 
 
