@@ -243,10 +243,6 @@ RUN --mount=type=cache,target=/root/.cache/bazel \
       --cuda_version=13.0.0 \
       --cudnn_version=9.12.0 \
       --wheels=jaxlib,jax-cuda-plugin,jax-cuda-pjrt && \
-    for whl in /opt/jax/wheels/*.whl; do \
-      clean=$(echo "$whl" | sed 's/\.dev0+selfbuilt//g'); \
-      [ "$whl" != "$clean" ] && cp "$whl" "$clean" && rm "$whl"; \
-    done && \
     uv pip install --system \
       /opt/jax/wheels/jaxlib-*.whl \
       /opt/jax/wheels/jax_cuda13_plugin-*.whl \
@@ -255,6 +251,12 @@ RUN --mount=type=cache,target=/root/.cache/bazel \
     uv pip install --system --no-deps jax==${JAX_VERSION} && \
     cp /opt/jax/wheels/*.whl /opt/wheels/ && \
     rm -rf /opt/jax
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    for whl in /opt/wheels/*selfbuilt*.whl; do \
+      [ -f "$whl" ] || continue; \
+      uv tool run change_wheel_version "$whl" --version ${JAX_VERSION} --delete-old-wheel; \
+    done
 
 # [10] ROS 2 Jazzy client
 RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | \
