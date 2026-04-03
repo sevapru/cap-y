@@ -7,7 +7,7 @@ services:
         CUDA_ARCH_BIN: "${CUDA_ARCH_BIN:-11.0}"
         OPENCV_VERSION: "${OPENCV_VERSION:-4.13.0}"
     image: cap-y:latest
-    container_name: cap-y
+
     runtime: nvidia
     shm_size: "8g"
     init: true
@@ -20,6 +20,8 @@ services:
       - "8117:8117"    # OWL-ViT (full profile)
       - "8118:8118"    # CuRobo (custom profile)
     environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
       - HF_TOKEN=${HF_TOKEN:-}
       - HF_HOME=/data/huggingface
       - CUDA_HOME=/usr/local/cuda
@@ -39,6 +41,102 @@ services:
       start_period: 120s
     restart: unless-stopped
 
+  capx-open:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.open
+      args:
+        BASE_IMAGE: cap-y:latest
+        CUDA_ARCH_BIN: "${CUDA_ARCH_BIN:-11.0}"
+    image: cap-y-open:latest
+
+    runtime: nvidia
+    shm_size: "8g"
+    init: true
+    profiles: ["open", "all"]
+    ports:
+      - "8110:8110"
+      - "8113:8113"
+      - "8114:8114"
+      - "8115:8115"
+      - "8116:8116"
+      - "8117:8117"
+      - "8118:8118"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HF_HOME=/data/huggingface
+      - CUDA_HOME=/usr/local/cuda
+      - CAPX_PROFILE=${CAPX_PROFILE:-default}
+      - CAPX_HOST=0.0.0.0
+      - MUJOCO_GL=egl
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+    volumes:
+      - ..:/workspace
+      - ${HOME}/.cache/huggingface:/data/huggingface
+      - capx-uv-cache:/root/.cache/uv
+      - capx-ccache:/root/.ccache
+    restart: unless-stopped
+
+  capx-nvidia:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.nvidia
+      args:
+        BASE_IMAGE: cap-y-open:latest
+    image: cap-y-nvidia:latest
+
+    runtime: nvidia
+    shm_size: "8g"
+    init: true
+    profiles: ["nvidia", "all"]
+    ports:
+      - "8110:8110"
+      - "8113:8113"
+      - "8114:8114"
+      - "8115:8115"
+      - "8116:8116"
+      - "8117:8117"
+      - "8118:8118"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HF_HOME=/data/huggingface
+      - CUDA_HOME=/usr/local/cuda
+      - CAPX_PROFILE=${CAPX_PROFILE:-default}
+      - CAPX_HOST=0.0.0.0
+      - MUJOCO_GL=egl
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+    volumes:
+      - ..:/workspace
+      - ${HOME}/.cache/huggingface:/data/huggingface
+      - capx-uv-cache:/root/.cache/uv
+      - capx-ccache:/root/.ccache
+    restart: unless-stopped
+
+  capx-base:
+    image: cap-y:latest
+    runtime: nvidia
+    shm_size: "8g"
+    init: true
+    stdin_open: true
+    tty: true
+    entrypoint: /bin/bash
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HF_HOME=/data/huggingface
+      - CUDA_HOME=/usr/local/cuda
+      - MUJOCO_GL=egl
+    volumes:
+      - ..:/workspace
+      - ${HOME}/.cache/huggingface:/data/huggingface
+      - capx-uv-cache:/root/.cache/uv
+      - capx-ccache:/root/.ccache
+
   capx-test:
     image: cap-y:latest
     container_name: cap-y-test
@@ -48,8 +146,42 @@ services:
     volumes:
       - ..:/workspace
     environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
       - MUJOCO_GL=egl
-    command: ["/workspace/scripts/test_cuda_acceleration.py"]
+    command: ["/workspace/scripts/test_container_base.py"]
+
+  capx-test-open:
+    image: cap-y-open:latest
+    container_name: cap-y-test-open
+    runtime: nvidia
+    entrypoint: python
+    profiles: ["test-open"]
+    volumes:
+      - ..:/workspace
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - MUJOCO_GL=egl
+      - ROS_DISTRO=jazzy
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+    command: ["/workspace/scripts/test_container_open.py"]
+
+  capx-test-nvidia:
+    image: cap-y-nvidia:latest
+    container_name: cap-y-test-nvidia
+    runtime: nvidia
+    entrypoint: python
+    profiles: ["test-nvidia"]
+    volumes:
+      - ..:/workspace
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - MUJOCO_GL=egl
+      - ROS_DISTRO=jazzy
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+    command: ["/workspace/scripts/test_container_nvidia.py"]
 
 volumes:
   capx-uv-cache:

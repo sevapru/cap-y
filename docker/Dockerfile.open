@@ -45,20 +45,29 @@ RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
 # nvblox C++ core (Apache 2.0) -- built from source, no Isaac ROS wrapper
+ARG CUDA_ARCH_BIN="11.0"
 RUN --mount=type=cache,target=/root/.ccache \
-    git clone --depth 1 https://github.com/nvidia-isaac/nvblox.git /opt/nvblox && \
-    cd /opt/nvblox/nvblox && mkdir build && cd build && \
+    git clone --depth 1 --branch public https://github.com/nvidia-isaac/nvblox.git /opt/nvblox && \
+    cd /opt/nvblox && mkdir build && cd build && \
     cmake .. \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_INSTALL_PREFIX=/usr/local \
       -DCMAKE_C_COMPILER_LAUNCHER=ccache \
       -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+      -DCMAKE_PREFIX_PATH="$(python3 -c 'import torch; print(torch.utils.cmake_prefix_path)')" \
+      -DCMAKE_CUDA_ARCHITECTURES="$(echo ${CUDA_ARCH_BIN} | tr -d '.')" \
+      -DBUILD_TESTING=OFF \
     && make -j$(nproc) && make install && ldconfig \
     && rm -rf /opt/nvblox
 
 # Drake (BSD 3-Clause) -- for GCS globally-optimal trajectory planning
+# No aarch64 wheel available; install only on x86_64
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system drake
+    if [ "$(uname -m)" = "x86_64" ]; then \
+      uv pip install --system drake; \
+    else \
+      echo "INFO: Drake has no aarch64 wheel, skipping ($(uname -m))"; \
+    fi
 
 # LiveKit Python SDK (Apache 2.0)
 RUN --mount=type=cache,target=/root/.cache/uv \
