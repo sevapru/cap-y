@@ -1,0 +1,321 @@
+#!/usr/bin/env python3
+"""cap-y base container verification suite.
+
+Validates CUDA acceleration, wheel integrity, and Python package imports.
+Run inside the cap-y container with GPU access (runtime: nvidia).
+
+Usage:
+    python scripts/test_container_base.py
+    # or via docker compose:
+    docker compose -f docker/docker-compose.capx.yml --profile test run capx-test
+"""
+
+import glob
+import importlib
+import os
+import subprocess
+import sys
+import zipfile
+
+PASS = 0
+FAIL = 0
+INFO = 0
+
+
+def report(status: str, module: str, detail: str):
+    global PASS, FAIL, INFO
+    if status == "PASS":
+        PASS += 1
+    elif status == "FAIL":
+        FAIL += 1
+    elif status == "INFO":
+        INFO += 1
+    print(f"[{status}] {module} -- {detail}")
+
+
+# ---------------------------------------------------------------------------
+# CUDA runtime
+# ---------------------------------------------------------------------------
+
+def test_cuda_runtime():
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            report("FAIL", "CUDA Runtime", "No CUDA runtime")
+            return
+        mem_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        report("PASS", "CUDA Runtime", f"Driver OK, {mem_gb:.1f} GB VRAM")
+    except Exception as e:
+        report("FAIL", "CUDA Runtime", str(e))
+
+
+# ---------------------------------------------------------------------------
+# OpenCV CUDA
+# ---------------------------------------------------------------------------
+
+def test_opencv():
+    try:
+        import cv2
+        import numpy as np
+
+        version = cv2.__version__
+        build_info = cv2.getBuildInformation()
+        cuda_devices = cv2.cuda.getCudaEnabledDeviceCount()
+        if cuda_devices == 0:
+            report("FAIL", f"OpenCV {version}", "No CUDA devices")
+            return
+
+        checks = {
+            "CUDA": "NVIDIA CUDA" in build_info,
+            "cuDNN": "cuDNN:" in build_info and "YES" in build_info.split("cuDNN:")[1][:30],
+            "CUBLAS": "CUBLAS" in build_info,
+            "FAST_MATH": "FAST_MATH" in build_info,
+            "GStreamer": "GStreamer" in build_info,
+        }
+        failed = [k for k, v in checks.items() if not v]
+        if failed:
+            report("FAIL", f"OpenCV {version}", f"Missing: {', '.join(failed)}")
+            return
+
+        mat = cv2.cuda_GpuMat()
+        arr = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+        mat.upload(arr)
+        assert np.array_equal(arr, mat.download()), "GpuMat roundtrip mismatch"
+
+        report("PASS", f"OpenCV {version}", f"CUDA {cuda_devices} device(s), cuDNN, cuBLAS, GStreamer")
+    except Exception as e:
+        report("FAIL", "OpenCV", str(e))
+
+
+# ---------------------------------------------------------------------------
+# PyTorch
+# ---------------------------------------------------------------------------
+
+def test_pytorch():
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            report("FAIL", f"PyTorch {torch.__version__}", "CUDA not available")
+            return
+
+        name = torch.cuda.get_device_name(0)
+        cap = torch.cuda.get_device_capability(0)
+
+        a = torch.randn(256, 256, dtype=torch.float16, device="cuda")
+        c = torch.matmul(a, a)
+        assert c.shape == (256, 256)
+        del a, c
+
+        report("PASS", f"PyTorch {torch.__version__}",
+               f"{name} (sm_{cap[0]}{cap[1]}), CUDA {torch.version.cuda}, cuDNN {'ON' if torch.backends.cudnn.enabled else 'OFF'}")
+    except Exception as e:
+        report("FAIL", "PyTorch", str(e))
+
+
+# ---------------------------------------------------------------------------
+# Open3D CUDA
+# ---------------------------------------------------------------------------
+
+def test_open3d():
+    try:
+        import open3d as o3d
+        import open3d.core as o3c
+
+        version = o3d.__version__
+        if not o3c.cuda.is_available():
+            report("FAIL", f"Open3D {version}", "CUDA not available")
+            return
+
+        t = o3c.Tensor([1.0, 2.0, 3.0], dtype=o3c.float32, device=o3c.Device("CUDA:0"))
+        assert t.shape == o3c.SizeVector([3])
+        del t
+
+        torch_ops = False
+        try:
+            import open3d.ml.torch
+            torch_ops = True
+        except ImportError as ie:
+            if "tensorboard" in str(ie):
+                torch_ops = True
+
+        report("PASS" if torch_ops else "FAIL", f"Open3D {version}",
+               f"CUDA {o3c.cuda.device_count()} device(s), PyTorch ops {'OK' if torch_ops else 'MISSING'}")
+    except Exception as e:
+        report("FAIL", "Open3D", str(e))
+
+
+# ---------------------------------------------------------------------------
+# JAX
+# ---------------------------------------------------------------------------
+
+def test_jax():
+    try:
+        import jax
+        devices = jax.devices()
+        gpu = [d for d in devices if d.platform in ("gpu", "cuda")]
+        if gpu:
+            report("PASS", f"JAX {jax.__version__}", f"GPU accelerated, {len(gpu)} CUDA device(s)")
+        else:
+            report("FAIL", f"JAX {jax.__version__}", f"CPU only, devices: {devices}")
+    except Exception as e:
+        report("FAIL", "JAX", f"Import failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# CuRobo
+# ---------------------------------------------------------------------------
+
+def test_curobo():
+    try:
+        spec = importlib.util.find_spec("curobo")
+        if spec is None:
+            report("FAIL", "CuRobo", "Package not installed")
+            return
+
+        path = ""
+        if spec.submodule_search_locations:
+            path = spec.submodule_search_locations[0]
+        elif spec.origin:
+            path = os.path.dirname(spec.origin)
+
+        so_files = glob.glob(os.path.join(path, "**/*.so"), recursive=True) if path else []
+        if path and os.path.exists(path):
+            report("PASS", "CuRobo", f"{len(so_files)} native extension(s) at {path}")
+        else:
+            report("FAIL", "CuRobo", f"Source missing at {path}")
+    except Exception as e:
+        report("FAIL", "CuRobo", str(e))
+
+
+# ---------------------------------------------------------------------------
+# ContactGraspNet
+# ---------------------------------------------------------------------------
+
+def test_contact_graspnet():
+    try:
+        import contact_graspnet_pytorch  # noqa: F401
+        report("PASS", "ContactGraspNet", "Package imported, PointNet2 CUDA ops available")
+    except ImportError:
+        spec = importlib.util.find_spec("contact_graspnet_pytorch")
+        if spec and spec.origin and os.path.exists(spec.origin):
+            report("PASS", "ContactGraspNet", f"Found at {spec.origin}")
+        else:
+            report("FAIL", "ContactGraspNet", "Not installed")
+    except Exception as e:
+        report("FAIL", "ContactGraspNet", str(e))
+
+
+# ---------------------------------------------------------------------------
+# PyRoKi
+# ---------------------------------------------------------------------------
+
+def test_pyroki():
+    try:
+        import pyroki  # noqa: F401
+        report("PASS", "PyRoKi", "Package imported")
+    except Exception as e:
+        report("FAIL", "PyRoKi", f"Import failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Wheel integrity (/opt/wheels/)
+# ---------------------------------------------------------------------------
+
+def test_wheel_integrity():
+    wheel_dir = "/opt/wheels"
+    if not os.path.isdir(wheel_dir):
+        report("INFO", "Wheels", f"{wheel_dir} does not exist (caches cleaned?)")
+        return
+
+    wheels = glob.glob(os.path.join(wheel_dir, "*.whl"))
+    if not wheels:
+        report("INFO", "Wheels", "No wheels in /opt/wheels/")
+        return
+
+    dirty = []
+    for whl in wheels:
+        basename = os.path.basename(whl)
+        if "selfbuilt" in basename:
+            dirty.append(basename)
+            continue
+        try:
+            with zipfile.ZipFile(whl) as zf:
+                meta_files = [n for n in zf.namelist() if n.endswith("METADATA")]
+                for mf in meta_files:
+                    for line in zf.read(mf).decode().splitlines():
+                        if line.startswith("Version:") and "selfbuilt" in line:
+                            dirty.append(f"{basename} (Version: line)")
+        except Exception:
+            dirty.append(f"{basename} (unreadable)")
+
+    if dirty:
+        report("FAIL", "Wheels", f"{len(dirty)} dirty wheel(s): {', '.join(dirty)}")
+    else:
+        report("PASS", "Wheels", f"{len(wheels)} wheel(s) in /opt/wheels/, all clean")
+
+
+# ---------------------------------------------------------------------------
+# LIBERO venv (optional)
+# ---------------------------------------------------------------------------
+
+def test_libero_venv():
+    venv_python = "/opt/venv-libero/bin/python"
+    if not os.path.exists(venv_python):
+        report("INFO", "LIBERO venv", "Not installed (/opt/venv-libero not found)")
+        return
+    try:
+        result = subprocess.run(
+            [venv_python, "-c", "import mujoco; print('MuJoCo', mujoco.__version__)"],
+            capture_output=True, text=True, timeout=30,
+            env={**os.environ, "MUJOCO_GL": "egl"},
+        )
+        if result.returncode == 0:
+            report("PASS", "LIBERO venv", result.stdout.strip())
+        else:
+            report("FAIL", "LIBERO venv", result.stderr.strip()[:200])
+    except Exception as e:
+        report("FAIL", "LIBERO venv", str(e))
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    print("=" * 60)
+    print("cap-y Base Container Verification")
+    print("=" * 60)
+    print()
+
+    test_cuda_runtime()
+    test_opencv()
+    test_pytorch()
+    test_open3d()
+    test_jax()
+    test_curobo()
+    test_contact_graspnet()
+    test_pyroki()
+    test_wheel_integrity()
+    test_libero_venv()
+
+    print()
+    print("-" * 60)
+    total = PASS + FAIL
+    print(f"Passed:  {PASS}/{total}")
+    if INFO:
+        print(f"Info:    {INFO} (optional/skipped)")
+    if FAIL:
+        print(f"FAILED:  {FAIL}")
+    print("-" * 60)
+
+    if FAIL:
+        print("RESULT: FAIL")
+        sys.exit(1)
+    else:
+        print("RESULT: ALL CHECKS PASSED")
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

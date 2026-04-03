@@ -23,8 +23,13 @@ FROM ${BASE_IMAGE}
 ENV DEBIAN_FRONTEND=noninteractive \
     ROS_DISTRO=jazzy
 
-# Isaac ROS common dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Isaac ROS apt repository (release-4.3, Noble)
+RUN curl -fsSL https://isaac.download.nvidia.com/isaac-ros/repos.key \
+      | gpg --dearmor -o /usr/share/keyrings/nvidia-isaac-ros.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/nvidia-isaac-ros.gpg] \
+      https://isaac.download.nvidia.com/isaac-ros/release-4.3 noble main" \
+      > /etc/apt/sources.list.d/nvidia-isaac-ros.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
       ros-${ROS_DISTRO}-isaac-ros-common \
       ros-${ROS_DISTRO}-isaac-ros-nitros \
     && rm -rf /var/lib/apt/lists/* \
@@ -65,6 +70,13 @@ RUN cd /opt/isaac_ros_ws/src && \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system nvidia-cutamp 2>/dev/null || \
       echo "INFO: cuTAMP not available via pip, install from NVIDIA NGC"
+
+# ScheduleStream (NVIDIA NC License)
+# GPU-accelerated multi-arm task scheduling and bimanual coordination
+RUN --mount=type=cache,target=/root/.cache/uv \
+    git clone --depth 1 https://github.com/NVlabs/ScheduleStream.git /opt/schedulestream && \
+    uv pip install --system -e /opt/schedulestream 2>/dev/null || \
+      echo "INFO: ScheduleStream install failed (may need cuRobo runtime)"
 
 # Source Isaac ROS workspace
 RUN echo '. /opt/isaac_ros_ws/install/setup.bash 2>/dev/null || true' >> /root/.bashrc
