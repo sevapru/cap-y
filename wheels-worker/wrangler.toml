@@ -1,0 +1,11 @@
+name = "wheels-sobaka-dev"
+main = "src/index.js"
+compatibility_date = "2026-04-01"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "jetson-wheels"
+
+[route]
+pattern = "wheels.sobaka.dev/*"
+zone_name = "sobaka.dev"

@@ -4,7 +4,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
       args:
-        CUDA_ARCH: "${CUDA_ARCH:-11.0}"
+        CUDA_ARCH_BIN: "${CUDA_ARCH_BIN:-11.0}"
         OPENCV_VERSION: "${OPENCV_VERSION:-4.13.0}"
     image: cap-y:latest
     container_name: cap-y
