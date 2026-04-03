@@ -64,8 +64,8 @@ SERVER_REGISTRY: dict[str, dict[str, Any]] = {
     "pyroki": {
         "target": "capx.serving.launch_pyroki_server",
         "default_port": 8116,
-        "gpu_required": False,
-        "gpu_memory_mb": 0,
+        "gpu_required": True,
+        "gpu_memory_mb": 500,
         "extra_args": {},
     },
     "sam2": {

@@ -5,19 +5,15 @@
 # cap-y (Agentic Robot Manipulation)
 
 
-
 [Get Started](#get-started) · [What's Inside](#whats-inside) · [Wheels](#pre-built-wheels) · [Containers](#container-family) · [vs CaP-X](#vs-cap-x-upstream)
 
 [Docs](#docs) · [LinkedIn](https://linkedin.com/in/sevapru) · [wheels.sobaka.dev](https://wheels.sobaka.dev)
 
-**CUDA-optimized Docker runtime for robot control on NVIDIA Jetson Thor.**
+**CUDA-optimized Docker runtime for robot control on NVIDIA Jetson Thor.** by [sobaka.dev](https://sobaka.dev) 🐕
 
 Dedicated environemnt for Agentic humanoid robot operation designed to provide best performance and acceleration available.
 
 Fork of [CaP-X](https://github.com/capgym/cap-x). Everything that can run on GPU -- runs on GPU. Pull the container, plug in your robot, go.
-by [sobaka.dev](https://sobaka.dev) 🐕
-
-
 
 
 ## Get Started

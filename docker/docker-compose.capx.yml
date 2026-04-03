@@ -1,8 +1,8 @@
 services:
   capx-serving:
     build:
-      context: .
-      dockerfile: Dockerfile.fast
+      context: ..
+      dockerfile: docker/Dockerfile
       args:
         CUDA_ARCH: "${CUDA_ARCH:-11.0}"
         OPENCV_VERSION: "${OPENCV_VERSION:-4.13.0}"
@@ -20,14 +20,14 @@ services:
       - "8117:8117"    # OWL-ViT (full profile)
       - "8118:8118"    # CuRobo (custom profile)
     environment:
-      - HF_TOKEN=${HF_TOKEN}
+      - HF_TOKEN=${HF_TOKEN:-}
       - HF_HOME=/data/huggingface
       - CUDA_HOME=/usr/local/cuda
       - CAPX_PROFILE=${CAPX_PROFILE:-default}
       - CAPX_HOST=0.0.0.0
       - MUJOCO_GL=egl
     volumes:
-      - .:/workspace
+      - ..:/workspace
       - ${HOME}/.cache/huggingface:/data/huggingface
       - capx-uv-cache:/root/.cache/uv
       - capx-ccache:/root/.ccache
@@ -43,12 +43,13 @@ services:
     image: cap-y:latest
     container_name: cap-y-test
     runtime: nvidia
+    entrypoint: python
     profiles: ["test"]
     volumes:
-      - .:/workspace
+      - ..:/workspace
     environment:
       - MUJOCO_GL=egl
-    command: python /workspace/scripts/test_cuda_acceleration.py
+    command: ["/workspace/scripts/test_cuda_acceleration.py"]
 
 volumes:
   capx-uv-cache:
