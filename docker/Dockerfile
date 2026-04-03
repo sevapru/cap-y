@@ -5,54 +5,65 @@ ARG CUDA_ARCH_BIN="11.0"
 ARG OPENCV_VERSION="4.13.0"
 ARG PYTHON_VERSION="3.12"
 ARG TORCH_VERSION="2.11.0"
+ARG OPEN3D_BRANCH=main
+ARG JAX_VERSION=0.9.2
 
 ENV DEBIAN_FRONTEND=noninteractive \
     CUDA_HOME=/usr/local/cuda \
     TORCH_CUDA_ARCH_LIST="${CUDA_ARCH_BIN}" \
     CCACHE_DIR=/root/.ccache \
     PATH="/usr/local/cuda/bin:${PATH}" \
-    LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+    LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}" \
+    UV_HTTP_TIMEOUT=300
 
+# [1] System deps (single layer: base + OpenCV + Open3D + RealSense)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.12 python3.12-dev python3.12-venv python3-pip \
+    python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv python3-pip \
     build-essential cmake ninja-build git ccache pkg-config \
+    curl wget unzip file \
     libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
     libavcodec-dev libavformat-dev libswscale-dev \
     libjpeg-dev libpng-dev libtiff-dev libwebp-dev libv4l-dev \
-    libeigen3-dev libtbb-dev \
+    libeigen3-dev libtbb-dev libgtk-3-dev \
     libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev \
-    libegl1 libgl1 libglvnd-dev \
-    libgtk-3-dev \
-    curl wget unzip file \
+    libegl1 libgl1 libglvnd-dev libglu1-mesa-dev \
+    libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+    libusb-1.0-0-dev liblzf-dev libfmt-dev pybind11-dev \
+    clang libc++-dev libc++abi-dev libomp-dev \
+    libssl-dev libcurl4-openssl-dev \
+    gfortran nasm apt-transport-https \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -sSf https://librealsense.realsenseai.com/Debian/librealsenseai.asc | \
+       gpg --dearmor > /etc/apt/keyrings/librealsenseai.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/librealsenseai.gpg] https://librealsense.realsenseai.com/Debian/apt-repo noble main" > \
+       /etc/apt/sources.list.d/librealsense.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends librealsense2-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 && \
-    update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1
+# [2] Python + uv
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_VERSION} 1 && \
+    rm -f /usr/lib/python${PYTHON_VERSION}/EXTERNALLY-MANAGED && \
+    curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    ln -sf /root/.local/bin/uv /usr/local/bin/uv && \
+    uv pip install --system "numpy>=2.0,<3"
 
-RUN rm -f /usr/lib/python3.12/EXTERNALLY-MANAGED
-
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    ln -sf /root/.local/bin/uv /usr/local/bin/uv
-
-RUN uv pip install --system numpy==1.26.4
-
-RUN mkdir -p /opt/opencv-build && cd /opt/opencv-build && \
+# [3] OpenCV 4.13 CUDA
+RUN mkdir -p /opt/wheels /opt/opencv-build && cd /opt/opencv-build && \
     git clone --depth 1 --branch ${OPENCV_VERSION} https://github.com/opencv/opencv.git && \
     git clone --depth 1 --branch ${OPENCV_VERSION} https://github.com/opencv/opencv_contrib.git
 
 RUN ln -sfnv /usr/include/$(uname -m)-linux-gnu/cudnn_version_v*.h \
     /usr/include/$(uname -m)-linux-gnu/cudnn_version.h 2>/dev/null || true
 
+# FP16 half-cast patches from jetson-containers
 RUN cd /opt/opencv-build && \
     sed -i 's|weight != 1.0|(float)weight != 1.0f|' \
       opencv/modules/dnn/src/cuda4dnn/primitives/normalize_bbox.hpp && \
     sed -i 's|nms_iou_threshold > 0|(float)nms_iou_threshold > 0.0f|' \
       opencv/modules/dnn/src/cuda4dnn/primitives/region.hpp
-# ---------------------------------------------------------------------------
-# OpenCV from source
-# Build with CUDA on Jetson
-# https://docs.opencv.org/4.13.0/d6/d00/tutorial_py_root.html
-# ---------------------------------------------------------------------------
+
 RUN --mount=type=cache,target=/root/.ccache \
     cd /opt/opencv-build && mkdir -p build && cd build && \
     cmake -G Ninja ../opencv \
@@ -87,11 +98,11 @@ RUN --mount=type=cache,target=/root/.ccache \
       -DBUILD_opencv_rgbd=OFF \
       -DBUILD_opencv_python2=OFF \
       -DBUILD_opencv_python3=ON \
-      -DPYTHON3_EXECUTABLE=/usr/bin/python3.12 \
-      -DPYTHON3_INCLUDE_DIR=$(python3.12 -c "from sysconfig import get_paths; print(get_paths()['include'])") \
-      -DPYTHON3_LIBRARY=$(find /usr/lib -name 'libpython3.12*.so*' | head -1) \
-      -DPYTHON3_PACKAGES_PATH=/usr/local/lib/python3.12/dist-packages \
-      -DPYTHON3_NUMPY_INCLUDE_DIRS=$(python3.12 -c "import numpy; print(numpy.get_include())" 2>/dev/null || echo "/usr/lib/python3/dist-packages/numpy/core/include") \
+      -DPYTHON3_EXECUTABLE=/usr/bin/python${PYTHON_VERSION} \
+      -DPYTHON3_INCLUDE_DIR=$(python${PYTHON_VERSION} -c "from sysconfig import get_paths; print(get_paths()['include'])") \
+      -DPYTHON3_LIBRARY=$(find /usr/lib -name 'libpython${PYTHON_VERSION}*.so*' | head -1) \
+      -DPYTHON3_PACKAGES_PATH=/usr/local/lib/python${PYTHON_VERSION}/dist-packages \
+      -DPYTHON3_NUMPY_INCLUDE_DIRS=$(python${PYTHON_VERSION} -c "import numpy; print(numpy.get_include())" 2>/dev/null || echo "/usr/lib/python3/dist-packages/numpy/core/include") \
       -DBUILD_opencv_java=OFF \
       -DBUILD_TESTS=OFF \
       -DBUILD_PERF_TESTS=OFF \
@@ -101,7 +112,7 @@ RUN --mount=type=cache,target=/root/.ccache \
     && cmake --build . --parallel $(nproc) \
     && cmake --install . \
     && ldconfig \
-    && OPENCV_DIST="/usr/local/lib/python3.12/dist-packages/opencv_python_headless-${OPENCV_VERSION}.dist-info" \
+    && OPENCV_DIST="/usr/local/lib/python${PYTHON_VERSION}/dist-packages/opencv_python_headless-${OPENCV_VERSION}.dist-info" \
     && mkdir -p "$OPENCV_DIST" \
     && printf "Metadata-Version: 2.1\nName: opencv-python-headless\nVersion: ${OPENCV_VERSION}\n" > "$OPENCV_DIST/METADATA" \
     && echo "opencv-python-headless" > "$OPENCV_DIST/top_level.txt" \
@@ -111,39 +122,21 @@ RUN --mount=type=cache,target=/root/.ccache \
 RUN python3 -c "import cv2; print('OpenCV', cv2.__version__); assert 'CUDA' in cv2.getBuildInformation(), 'NOT built with CUDA'; print('CUDA build: OK')" \
     && python3 -c "import cv2; [print(l) for l in cv2.getBuildInformation().splitlines() if any(k in l for k in ('CUDA','cuDNN','GStreamer','NEON','NVIDIA'))]"
 
-ENV UV_HTTP_TIMEOUT=300
+# [4] PyTorch 2.11 cu130
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system \
     torch==${TORCH_VERSION} torchvision \
     --index-url https://download.pytorch.org/whl/cu130
 
+# [5] Build tools
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system hatchling setuptools wheel scikit-build-core yapf
 
-# ---------------------------------------------------------------------------
-# Open3D from source
-# Build with CUDA on Jetson, GUI on (full OpenGL available)
-# https://www.open3d.org/docs/release/arm.html
-# ---------------------------------------------------------------------------
-# Use main branch: v0.19.0 fails with CUDA 13.0 due to outdated stdgpu
-# Fixed in main via PRs #7083, #7398 (issues #7376, #7397)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-    libusb-1.0-0-dev liblzf-dev libfmt-dev pybind11-dev \
-    clang libc++-dev libc++abi-dev libomp-dev libglu1-mesa-dev libssl-dev \
-    libcurl4-openssl-dev \
-    gfortran nasm apt-transport-https \
-    && mkdir -p /etc/apt/keyrings \
-    && curl -sSf https://librealsense.realsenseai.com/Debian/librealsenseai.asc | \
-       gpg --dearmor > /etc/apt/keyrings/librealsenseai.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/librealsenseai.gpg] https://librealsense.realsenseai.com/Debian/apt-repo noble main" > \
-       /etc/apt/sources.list.d/librealsense.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends librealsense2-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN git clone --depth 1 --branch main --recursive https://github.com/isl-org/Open3D.git /opt/open3d && \
+# [6] Open3D CUDA (from source, Clang)
+RUN git clone --depth 1 --branch ${OPEN3D_BRANCH} --recursive https://github.com/isl-org/Open3D.git /opt/open3d && \
     git clone --depth 1 --branch main https://github.com/isl-org/Open3D-ML.git /opt/open3d/Open3D-ML
+
+RUN ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1
 
 RUN --mount=type=cache,target=/root/.ccache \
     export TORCH_CUDA_ARCH_LIST="${CUDA_ARCH_BIN}" && \
@@ -176,21 +169,22 @@ RUN --mount=type=cache,target=/root/.ccache \
       -DBUILD_UNIT_TESTS=OFF \
       -DBUILD_BENCHMARKS=OFF \
       -DBUILD_EXAMPLES=OFF \
-      -DPYTHON_EXECUTABLE=/usr/bin/python3.12 \
+      -DPYTHON_EXECUTABLE=/usr/bin/python${PYTHON_VERSION} \
     && make -j$(nproc) \
-    && ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1 \
-    && mkdir -p /opt/wheels \
     && LD_LIBRARY_PATH="/usr/local/cuda/lib64/stubs:${LD_LIBRARY_PATH}" make install-pip-package -j$(nproc) \
-    && cp /opt/open3d/build/lib/python_package/dist/open3d-*.whl /opt/wheels/ 2>/dev/null || true \
-    && rm -f /usr/local/cuda/lib64/stubs/libcuda.so.1 \
+    && cp /opt/open3d/build/lib/python_package/pip_package/open3d-*.whl /opt/wheels/ \
+    && echo "Open3D wheel saved: $(ls /opt/wheels/open3d-*.whl)" \
     && ldconfig \
     && rm -rf /opt/open3d
 
-RUN python3 -c "import importlib.util; assert importlib.util.find_spec('open3d') is not None, 'open3d not installed'; print('Open3D package found')"
+RUN rm -f /usr/local/cuda/lib64/stubs/libcuda.so.1
 
-# ---------------------------------------------------------------------------
-# cap-x dependencies + CUDA extensions (CuRobo, PointNet2)
-# ---------------------------------------------------------------------------
+RUN python3 -c "import importlib.util; assert importlib.util.find_spec('open3d') is not None, 'open3d not installed'"
+
+# [7] cap-x deps + CUDA extensions (CuRobo, PointNet2)
+COPY docker/patch-pyproject.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/patch-pyproject.sh
+
 WORKDIR /tmp/capx-install
 COPY pyproject.toml .
 COPY capx/third_party/sam3 capx/third_party/sam3
@@ -200,18 +194,18 @@ COPY capx/third_party/curobo capx/third_party/curobo
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=cache,target=/root/.ccache \
     mkdir -p capx && touch capx/__init__.py && \
-    sed -i 's|"open3d<=0.18.0 ; platform_machine == '"'"'aarch64'"'"'",||' pyproject.toml && \
-    sed -i 's|"open3d",|"open3d ; sys_platform == '"'"'never'"'"'",|' pyproject.toml && \
-    sed -i 's|"jax<0.4.30",||' pyproject.toml && \
-    sed -i 's|"jaxlib<0.4.30",||' pyproject.toml && \
-    sed -i 's|"numpy==1.26.4",||' pyproject.toml && \
-    sed -i 's|, editable = true||g' pyproject.toml && \
-    sed -i 's|editable = true, ||g' pyproject.toml && \
+    patch-pyproject.sh pyproject.toml && \
     SETUPTOOLS_SCM_PRETEND_VERSION=0.7.0 \
     uv pip install --system --no-build-isolation \
       ".[contactgraspnet,curobo]"
 
 RUN rm -rf /tmp/capx-install
+
+# [8] LIBERO evaluation venv (optional)
+ARG WITH_LIBERO=0
+RUN if [ "${WITH_LIBERO}" = "1" ]; then \
+      mkdir -p /tmp/libero-install; \
+    fi
 
 WORKDIR /tmp/libero-install
 COPY pyproject.toml .
@@ -223,29 +217,73 @@ COPY capx/third_party/LIBERO-PRO capx/third_party/LIBERO-PRO
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=cache,target=/root/.ccache \
-    mkdir -p capx && touch capx/__init__.py && \
-    uv venv /opt/venv-libero --python python${PYTHON_VERSION} --system-site-packages && \
-    sed -i 's|"open3d<=0.18.0 ; platform_machine == '"'"'aarch64'"'"'",||' pyproject.toml && \
-    sed -i 's|"open3d",|"open3d ; sys_platform == '"'"'never'"'"'",|' pyproject.toml && \
-    sed -i 's|"jax<0.4.30",||' pyproject.toml && \
-    sed -i 's|"jaxlib<0.4.30",||' pyproject.toml && \
-    sed -i 's|"numpy==1.26.4",||' pyproject.toml && \
-    sed -i 's|, editable = true||g' pyproject.toml && \
-    sed -i 's|editable = true, ||g' pyproject.toml && \
-    uv pip install --python /opt/venv-libero/bin/python \
-      --no-build-isolation \
-      ".[libero,contactgraspnet]" || \
-    echo "WARNING: LIBERO venv install had errors (may need runtime install)"
+    if [ "${WITH_LIBERO}" = "1" ]; then \
+      mkdir -p capx && touch capx/__init__.py && \
+      uv venv /opt/venv-libero --python python${PYTHON_VERSION} --system-site-packages && \
+      patch-pyproject.sh pyproject.toml && \
+      uv pip install --python /opt/venv-libero/bin/python \
+        --no-build-isolation \
+        ".[libero,contactgraspnet]" || \
+      echo "WARNING: LIBERO venv install had errors (may need runtime install)"; \
+    else \
+      echo "Skipping LIBERO venv (WITH_LIBERO=0)"; \
+    fi
 
 RUN rm -rf /tmp/libero-install
 
-# JAX with CUDA 13 -- installed last so numpy upgrade is not reverted
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system "jax[cuda13]"
+# [9] JAX with CUDA 13 (built from source for SM 110, no PTX JIT)
+RUN --mount=type=cache,target=/root/.cache/bazel \
+    git clone --branch "jax-v${JAX_VERSION}" --depth=1 --recursive https://github.com/google/jax /opt/jax && \
+    cd /opt/jax && \
+    mkdir -p /opt/jax/wheels && \
+    python3 build/build.py build \
+      --clang_path=/usr/bin/clang \
+      --output_path=/opt/jax/wheels/ \
+      --cuda_compute_capabilities="sm_110" \
+      --cuda_version=13.0.0 \
+      --cudnn_version=9.12.0 \
+      --wheels=jaxlib,jax-cuda-plugin,jax-cuda-pjrt && \
+    for whl in /opt/jax/wheels/*.whl; do \
+      clean=$(echo "$whl" | sed 's/\.dev0+selfbuilt//g'); \
+      [ "$whl" != "$clean" ] && cp "$whl" "$clean" && rm "$whl"; \
+    done && \
+    uv pip install --system \
+      /opt/jax/wheels/jaxlib-*.whl \
+      /opt/jax/wheels/jax_cuda13_plugin-*.whl \
+      /opt/jax/wheels/jax_cuda13_pjrt-*.whl \
+      opt_einsum && \
+    uv pip install --system --no-deps jax==${JAX_VERSION} && \
+    cp /opt/jax/wheels/*.whl /opt/wheels/ && \
+    rm -rf /opt/jax
+
+# [10] ROS 2 Jazzy client
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | \
+    gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
+    http://packages.ros.org/ros2/ubuntu noble main" > /etc/apt/sources.list.d/ros2.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
+      ros-jazzy-rclpy \
+      ros-jazzy-action-msgs \
+      ros-jazzy-nav-msgs \
+      ros-jazzy-trajectory-msgs \
+      ros-jazzy-geometry-msgs \
+      ros-jazzy-sensor-msgs \
+      ros-jazzy-std-msgs \
+    && rm -rf /var/lib/apt/lists/* \
+    && echo '. /opt/ros/jazzy/setup.bash' >> /root/.bashrc
+
+ENV ROS_DISTRO=jazzy
+
+ARG CLEAN_CACHES=0
+RUN if [ "${CLEAN_CACHES}" = "1" ]; then \
+      echo "Cleaning build caches..." && \
+      rm -rf /root/.cache/bazel /root/.cache/uv /root/.cache/pip /root/.ccache /tmp/* && \
+      echo "Caches cleaned."; \
+    fi
 
 WORKDIR /workspace
 
-COPY entrypoint.sh /entrypoint.sh
+COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 EXPOSE 8110 8113 8114 8115 8116 8117 8118
