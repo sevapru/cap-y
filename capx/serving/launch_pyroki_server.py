@@ -155,6 +155,12 @@ logger = logging.getLogger("pyroki_server")
 
 app = FastAPI()
 
+
+@app.get("/health")
+async def health():
+    return {"status": "ready" if _ROBOT is not None else "initializing"}
+
+
 _ROBOT = None
 _ROBOT_COLL = None
 _TARGET_LINK = None

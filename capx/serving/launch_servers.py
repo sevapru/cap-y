@@ -131,11 +131,46 @@ class GpuInfo:
     memory_free_mb: int = 0
 
 
-def detect_gpus() -> list[GpuInfo]:
-    """Detect available GPUs via ``nvidia-smi``.
+def _detect_gpus_torch() -> list[GpuInfo] | None:
+    """Detect GPUs via PyTorch CUDA API (works on Tegra/Jetson)."""
+    try:
+        import torch
 
-    Returns a list of :class:`GpuInfo` with memory stats. Falls back to a
-    single entry ``GpuInfo(index=0)`` when ``nvidia-smi`` is unavailable.
+        if not torch.cuda.is_available():
+            return None
+        gpus: list[GpuInfo] = []
+        for i in range(torch.cuda.device_count()):
+            props = torch.cuda.get_device_properties(i)
+            total_mb = props.total_mem // (1024 * 1024)
+            free_mb, _ = torch.cuda.mem_get_info(i)
+            free_mb = free_mb // (1024 * 1024)
+            gpus.append(
+                GpuInfo(
+                    index=i,
+                    name=props.name,
+                    memory_total_mb=total_mb,
+                    memory_free_mb=free_mb,
+                )
+            )
+        return gpus or None
+    except Exception:
+        return None
+
+
+def _parse_smi_int(val: str) -> int | None:
+    """Parse an nvidia-smi value, returning None for ``[N/A]``."""
+    val = val.strip()
+    if not val or val == "[N/A]":
+        return None
+    return int(val)
+
+
+def detect_gpus() -> list[GpuInfo]:
+    """Detect available GPUs.
+
+    Tries ``nvidia-smi`` first, falling back to ``torch.cuda`` when
+    nvidia-smi returns ``[N/A]`` (integrated GPU on Jetson/Tegra) or is
+    unavailable.
     """
     try:
         result = subprocess.run(
@@ -149,32 +184,45 @@ def detect_gpus() -> list[GpuInfo]:
             timeout=10,
         )
         if result.returncode != 0:
-            logger.warning("nvidia-smi returned non-zero; falling back to GPU 0")
-            return [GpuInfo(index=0)]
+            logger.warning("nvidia-smi returned non-zero; trying torch.cuda")
+            return _detect_gpus_torch() or [GpuInfo(index=0)]
 
         gpus: list[GpuInfo] = []
+        has_na = False
         for line in result.stdout.strip().splitlines():
             parts = [p.strip() for p in line.split(",")]
             if len(parts) < 4:
                 continue
+            idx = _parse_smi_int(parts[0])
+            mem_total = _parse_smi_int(parts[2])
+            mem_free = _parse_smi_int(parts[3])
+            if idx is None:
+                continue
+            if mem_total is None or mem_free is None:
+                has_na = True
+                continue
             gpus.append(
                 GpuInfo(
-                    index=int(parts[0]),
+                    index=idx,
                     name=parts[1],
-                    memory_total_mb=int(parts[2]),
-                    memory_free_mb=int(parts[3]),
+                    memory_total_mb=mem_total,
+                    memory_free_mb=mem_free,
                 )
             )
+
+        if not gpus and has_na:
+            logger.info("nvidia-smi returned [N/A] (Tegra/integrated GPU); using torch.cuda")
+            return _detect_gpus_torch() or [GpuInfo(index=0)]
         if not gpus:
             return [GpuInfo(index=0)]
         return gpus
 
     except FileNotFoundError:
-        logger.warning("nvidia-smi not found; assuming single GPU at index 0")
-        return [GpuInfo(index=0)]
+        logger.warning("nvidia-smi not found; trying torch.cuda")
+        return _detect_gpus_torch() or [GpuInfo(index=0)]
     except Exception as exc:
-        logger.warning("GPU detection failed (%s); assuming single GPU at index 0", exc)
-        return [GpuInfo(index=0)]
+        logger.warning("GPU detection failed (%s); trying torch.cuda", exc)
+        return _detect_gpus_torch() or [GpuInfo(index=0)]
 
 
 def allocate_gpus(

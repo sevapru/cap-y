@@ -23,6 +23,12 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
+
+@app.get("/health")
+async def health():
+    return {"status": "ready" if _MODEL is not None else "initializing"}
+
+
 # Global state
 _PROC: Any | None = None
 _MODEL: Any | None = None

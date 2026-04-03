@@ -33,6 +33,12 @@ app = FastAPI()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+@app.get("/health")
+async def health():
+    return {"status": "ready" if _GRASP_ESTIMATOR is not None else "initializing"}
+
+
 # --- Global State ---
 _GRASP_ESTIMATOR: Any | None = None
 _DEVICE: str = "cuda"
