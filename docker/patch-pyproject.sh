@@ -16,6 +16,8 @@ sed -i \
   -e '/"jax<0.4.30"/d' \
   -e '/"jaxlib<0.4.30"/d' \
   -e '/"numpy==1.26.4"/d' \
+  -e '/"opencv-python-headless<4.13"/d' \
+  -e 's/"opencv-python-headless",/"opencv-python-headless ; sys_platform == '\''never'\''",/' \
   -e 's/, editable = true//g' \
   -e 's/editable = true, //g' \
   "$1"

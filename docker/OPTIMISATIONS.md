@@ -472,13 +472,22 @@ From `docker-compose.capx.yml`:
 | `capx-uv-cache` volume | named | Persists Python package cache across container recreations |
 | `healthcheck` | SAM3 :8114 | Probes SAM3 health endpoint every 30s with 120s startup grace (models take time to load) |
 
+## Build Args
+
+| Arg | Default | Effect |
+|-----|---------|--------|
+| `CUDA_ARCH_BIN` | `11.0` | GPU compute capability (11.0 = Jetson Thor, 8.9 = RTX 4080) |
+| `WITH_LIBERO` | `0` | Set to `1` to include LIBERO evaluation venv (+7 GB, robosuite/MuJoCo) |
+| `CLEAN_CACHES` | `0` | Set to `1` to remove bazel/uv/ccache after build (~20 GB smaller, for publishing) |
+| `JAX_VERSION` | `0.9.2` | JAX version to build from source |
+| `OPEN3D_BRANCH` | `main` | Open3D git branch (main has Jetson Thor fixes) |
+
 ---
 
 ## What's NOT Accelerated (and why)
 
 | Component | Acceleration | Reason |
 |-----------|-------------|--------|
-| PyRoKi IK | CPU (JAX JIT) | `jax<0.4.30` pin has no CUDA 13.0 aarch64 wheels. Upgrade to JAX 0.8+ for GPU |
 | opencv_rgbd | Disabled | Legacy OpenGL EXT calls incompatible with GLVND. Use Open3D TSDF/ICP instead |
 | Open3D WebRTC | Disabled | Not ported to ARM Linux |
 | Intel IPP/ISPC | N/A | Intel x86 only, not available on aarch64 |
