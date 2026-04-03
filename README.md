@@ -1,258 +1,222 @@
+<p align="center">
+  <img src="./docker/bird.png" alt="cap-y" width="400">
+</p>
+
+# cap-y (Agentic Robot Manipulation)
 
 
 
-# CaP-X
+[Get Started](#get-started) · [What's Inside](#whats-inside) · [Wheels](#pre-built-wheels) · [Containers](#container-family) · [vs CaP-X](#vs-cap-x-upstream)
 
-### A Framework for Benchmarking and Improving Coding Agents for Robot Manipulation
+[Docs](#docs) · [LinkedIn](https://linkedin.com/in/sevapru) · [wheels.sobaka.dev](https://wheels.sobaka.dev)
 
-[Project Page](https://capgym.github.io/) &ensp;|&ensp; [Paper](https://arxiv.org/abs/2603.22435) 
+**CUDA-optimized Docker runtime for robot control on NVIDIA Jetson Thor.**
 
-**Max Fu<sup>&#42;,1,2</sup>, Justin Yu<sup>&#42;,2</sup>, Karim El-Refai<sup>&#42;,2</sup>, Ethan Kou<sup>&#42;,2</sup>, Haoru Xue<sup>&#42;,1,2</sup>,
-Huang Huang<sup>3</sup>, Wenli Xiao<sup>4</sup>, Guanzhi Wang<sup>1</sup>, Fei-Fei Li<sup>3</sup>, Guanya Shi<sup>4</sup>, Jiajun Wu<sup>3</sup>,
-Shankar Sastry<sup>2</sup>, Yuke Zhu<sup>1</sup>, Ken Goldberg<sup>&dagger;,2</sup>, Jim Fan<sup>&dagger;,1</sup>**
+Dedicated environemnt for Agentic humanoid robot operation designed to provide best performance and acceleration available.
 
-<sup>1</sup>NVIDIA &ensp; <sup>2</sup>UC Berkeley &ensp; <sup>3</sup>Stanford University &ensp; <sup>4</sup>Carnegie Mellon University
-
-<sup>&#42;</sup>Equal contribution &ensp; <sup>&dagger;</sup>Equal advising
+Fork of [CaP-X](https://github.com/capgym/cap-x). Everything that can run on GPU -- runs on GPU. Pull the container, plug in your robot, go.
+by [sobaka.dev](https://sobaka.dev) 🐕
 
 
 
----
-**CaP-X** is an open-access framework for systematically studying Code-as-Policy agents in robot manipulation. It consists of four components:
 
+## Get Started
 
-| Component      | What it does                                                                                                                                                                                   |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **CaP-Gym**    | Interactive Gymnasium environments where agents control robots by generating Python code that composes perception and control primitives. 39 tasks across Robosuite, LIBERO-PRO, and BEHAVIOR. |
-| **CaP-Bench**  | Systematic benchmark evaluating coding agents across abstraction levels, interaction modes, and visual grounding modalities. 8 tiers (S1-S4 single-turn, M1-M4 multi-turn).                    |
-| **CaP-Agent0** | Training-free agentic framework with multi-turn visual differencing, auto-synthesized skill libraries, and parallel ensembled reasoning.                                                       |
-| **CaP-RL**     | Reinforcement learning on the coding agent via GRPO, using environment rewards to post-train language models. Transfers from sim to real with minimal gap.                                     |
-
-
----
-
-## Installation
-
-CaP-X uses [uv](https://docs.astral.sh/uv/) for dependency management. Requires **Python 3.10** and a **CUDA-capable GPU**.
+### One-line Install
 
 ```bash
-git clone --recurse-submodules https://github.com/capgym/cap-x && cd cap-x
-
-# Or if already cloned without --recurse-submodules:
-git submodule update --init --recursive
-
-# Install uv (if not present)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-uv python install 3.10 && uv venv -p 3.10
-
-# Base install
-uv sync
+curl -sSL https://raw.githubusercontent.com/sevapru/cap-y/main/scripts/install.sh | bash
 ```
 
-### Simulator-specific setup
-
-Pick **one** simulator family to install, as Robosuite (1.5.0) and LIBERO (`robosuite==1.4.0`) would be in conflict.
-
-#### Robosuite
+### Pull & Run
 
 ```bash
-uv sync --extra robosuite
+docker pull ghcr.io/sevapru/cap-y:latest
+docker tag ghcr.io/sevapru/cap-y:latest cap-y:latest
+docker run -it --rm --runtime nvidia --entrypoint bash -v .:/workspace cap-y
 ```
 
-#### LIBERO-PRO
+### Build from Source (like... 3 hours?)
 
-LIBERO requires a **separate virtual environment**.
+> ⚡ Tested on **Jetson AGX Thor** (sm_110, CUDA 13.0, 128 GB unified memory)
 
 ```bash
-uv venv .venv-libero --python 3.12
-source .venv-libero/bin/activate
-uv sync --active --extra libero --extra contactgraspnet
+git clone --recurse-submodules https://github.com/sevapru/cap-y && cd cap-y/docker
+
+# Auto-detect GPU and build (nvidia-smi detects sm_110 on Thor)
+./build.sh # Or specify GPU architecture manually with --arch 11.0 or --arch 8.9 (for RTX 4080)
+```
+Build takes ~2-3 hours first time (OpenCV CUDA + Open3D CUDA + JAX from source). Subsequent builds use ccache (~10 min).
+
+Build log always goes to `/tmp/cap-y-build.log`. Check for errors:
+```bash
+grep -i "error:" /tmp/cap-y-build.log | grep -v warning
 ```
 
-See [docs/libero-tasks.md](docs/libero-tasks.md) for running any of 130+ LIBERO tasks.
-
-#### BEHAVIOR (Isaac Sim)
-
-BEHAVIOR tasks run on NVIDIA Isaac Sim via OmniGibson. Requires Python 3.10 and CUDA 12.x.
+### Build with Docker Compose
 
 ```bash
-cd capx/third_party/b1k
-./uv_install.sh --dataset          # installs OmniGibson, Isaac Sim, BDDL, cuRobo, and downloads assets
-cd ../../..                        # back to repo root
-
-# Post-install fix — copy cuRobo JIT headers (run with b1k venv active)
-source capx/third_party/b1k/.venv/bin/activate
-cp capx/third_party/curobo/src/curobo/curobolib/cpp/*.h \
-   $(python -c "import sysconfig; print(sysconfig.get_path('purelib'))")/curobo/curobolib/cpp/
+cd cap-y/docker
+docker compose -f docker-compose.capx.yml up -d --build
 ```
 
-> The `--dataset` flag downloads robot assets, BEHAVIOR-1K scene/object assets, and 2025 challenge task instances. You will be prompted to accept the NVIDIA Isaac Sim EULA and BEHAVIOR dataset license. To auto-accept, add `--accept-dataset-tos`.
-
-For headless servers:
+Override build args via environment:
 ```bash
-sudo apt-get update && sudo apt-get install -y libegl1 libgl1
-# Remove duplicate Vulkan ICD if present (causes segfault on multi-GPU systems)
-sudo rm -f /usr/share/vulkan/icd.d/nvidia_icd.json
+CUDA_ARCH=8.9 docker compose -f docker-compose.capx.yml build    # RTX 4080
 ```
 
-See [docs/behavior-tasks.md](docs/behavior-tasks.md) for task details and expected baselines.
-
-### Docker (cap-y) -- Jetson Thor / NVIDIA GPU
-
-Pre-built container with everything CUDA-accelerated. No manual setup.
+### Start Perception Servers
 
 ```bash
-./build.sh                # auto-detects GPU, builds cap-y:latest
-docker compose -f docker-compose.capx.yml up -d   # start servers
+cd cap-y/docker
+docker compose -f docker-compose.capx.yml up -d                         # default: SAM3 + GraspNet + PyRoKi
+CAPX_PROFILE=full docker compose -f docker-compose.capx.yml up -d       # + OWL-ViT + SAM2
+CAPX_PROFILE=minimal docker compose -f docker-compose.capx.yml up -d    # PyRoKi only (IK go brrrr 🏎️)
 ```
 
-Switch profiles without rebuilding:
+Interactive shell:
+```bash
+docker run -it --rm --runtime nvidia --entrypoint bash -v .:/workspace cap-y
+```
+
+Or add to `~/.bashrc` for one-word access:
+```bash
+alias cap-y='docker run -it --rm --runtime nvidia --entrypoint bash -v .:/workspace cap-y'
+# then just: cap-y
+```
+
+### Verify Everything Works
 
 ```bash
-CAPX_PROFILE=default  # SAM3 + GraspNet + PyRoKi
-CAPX_PROFILE=full     # + OWL-ViT + SAM2
-CAPX_PROFILE=minimal  # PyRoKi only
+cd cap-y/docker
+docker compose -f docker-compose.capx.yml --profile test run cap-y-test # Expected: 8/8
 ```
 
-Run CUDA verification: `docker compose --profile test run cap-y-test`
 
-**What's accelerated:**
 
-| Module | Version | CUDA | Details |
-|--------|---------|------|---------|
-| OpenCV | 4.13 | cuDNN 9.12, cuBLAS, FAST_MATH | + GStreamer, NEON FP16/BF16/DOTPROD |
-| PyTorch | 2.11 cu130 | FlashAttention-4, sm_110 | aarch64 + x86_64 |
-| Open3D | 0.19+ | CUDA tensors, PyTorch ops | + RealSense, Open3D-ML, GUI |
-| JAX | 0.9.2 | cuda13 plugin | GPU IK via PyRoKi |
-| CuRobo | 0.7 | 5 CUDA extensions | collision-free trajectories |
-| ContactGraspNet | - | PointNet2 CUDA ops | 6-DOF grasp planning |
-| MuJoCo | 3.6 | EGL headless | LIBERO evaluation |
-| ROS 2 | Jazzy | - | rclpy + msg types (client-side) |
+## What's Inside
 
-**Portability** -- same Dockerfile, different GPU:
+| Module | Version | CUDA | Notes | On PyPI for aarch64? |
+|--------|---------|------|-------|:---:|
+| OpenCV | 4.13 | cuDNN 9.12, cuBLAS, FAST_MATH | GStreamer, NEON FP16/BF16 🏃 | ❌ no CUDA wheel |
+| Open3D | 0.19+ | CUDA tensors, PyTorch ops | RealSense D455, Open3D-ML, GUI | ❌ no wheel at all |
+| JAX | 0.9.2 | SM 110 native kernels | Built from source, no PTX JIT  | ❌ no SM 110 kernels |
+| CuRobo | 0.7 | 5 CUDA extensions | Collision-free trajectories | ❌ needs CUDA + torch |
+| ContactGraspNet | - | PointNet2 CUDA ops | 6-DOF grasps from depth | ❌ needs CUDA build |
+| PyTorch | 2.11 cu130 | FlashAttention-4, sm_110 | aarch64 native | ✅ |
+| MuJoCo | 3.6 | EGL headless | LIBERO evaluation | ✅ |
+| ROS 2 | Jazzy | - | rclpy + msg types  | ✅ apt |
+
+**5 out of 8 modules have no pre-built aarch64 CUDA packages anywhere.** We build them from source with full GPU acceleration for Jetson Thor.
+
+
+If you'd actually compare it with [jetson-containers](https://github.com/dusty-nv/jetson-containers/tree/master?tab=readme-ov-file)  - you'll understand how great this set is for 02.04.2026. 
+There is, mainly, no on-time cu130 support for containers and, as I would tell you: not enough developers who can provide this builds. 
+
+
+
+## Pre-built Wheels
+
+Index: [wheels.sobaka.dev](https://wheels.sobaka.dev)
+
+These don't exist on PyPI for Jetson Thor. We built them so you don't have to (you're welcome 🎁):
 
 ```bash
-./build.sh --arch 11.0   # Jetson Thor
-./build.sh --arch 8.9    # RTX 4080
-./build.sh --arch 8.6    # RTX 3090
+uv pip install --extra-index-url https://wheels.sobaka.dev/simple/ \
+  opencv-python-headless open3d jaxlib jax-cuda13-plugin
 ```
 
-See [OPTIMISATIONS.md](OPTIMISATIONS.md) for flag details. See [CLAUDE.md](CLAUDE.md) for agent/developer docs.
 
-### Optional extras
+| Package     | What you'd spend building it | What you spend with us |
+| ----------- | ---------------------------- | ---------------------- |
+| OpenCV CUDA | ~1 hour                      | `pip install` & ☕     |
+| Open3D CUDA | ~40 min                      | `pip install` & ☕     |
+| JAX SM 110  | ~2 hours                     | `pip install` & ☕     |
+ 
+
+
+## Container Family
+
+Split by license -- pick what you need:
+
+
+| Container      | Adds                                                     | License        | Vibe                                    |
+| -------------- | -------------------------------------------------------- | -------------- | --------------------------------------- |
+| `cap-y`        | OpenCV, Open3D, PyTorch, JAX, CuRobo, perception servers | Mixed          | "I see things and grab them" 👁️🤖      |
+| `cap-y-open`   | + ROS 2, Nav2, MoveIt 2, Drake, LiveKit                  | Apache/BSD/MIT | "I plan and navigate, commercially" 🗺️ |
+| `cap-y-nvidia` | + Isaac ROS cuMotion, cuVSLAM, NITROS                    | NVIDIA license | "I have enterprise friends" 🏢          |
+
 
 ```bash
-uv sync --extra verl             # RL training with VeRL/GRPO
-uv sync --extra contactgraspnet  # Contact-GraspNet grasp planning
-uv sync --extra curobo           # cuRobo GPU-accelerated IK & motion planning (requires CUDA)
+docker build -f docker/Dockerfile.open -t cap-y-open:latest ..
+docker build -f docker/Dockerfile.nvidia -t cap-y-nvidia:latest ..
 ```
 
-## Quick Start
 
-### 1. Perception servers (auto-launched)
 
-Perception servers (SAM3, ContactGraspNet, PyRoKi) are **auto-launched** by the YAML config when you run an evaluation. No manual setup required for most configs.
+## Ports
 
-> **SAM3 authentication:** SAM3 weights require HuggingFace access. Request access at the [SAM3 repo](https://github.com/facebookresearch/sam3), then authenticate locally with `huggingface-cli login`. Weights are cached after first download.
 
-To pre-launch servers (e.g. for sharing across multiple eval runs):
+| Port | Service                | When      |
+| ---- | ---------------------- | --------- |
+| 8110 | LLM proxy (OpenRouter) | always    |
+| 8113 | SAM2                   | `full`    |
+| 8114 | SAM3                   | `default` |
+| 8115 | ContactGraspNet        | `default` |
+| 8116 | PyRoKi IK              | `default` |
+| 8117 | OWL-ViT                | `full`    |
+| 8118 | CuRobo                 | custom    |
 
-```bash
-# Start SAM3 + GraspNet + PyRoKi with automatic GPU allocation
-uv run --no-sync --active capx/serving/launch_servers.py --profile default
-```
 
-Use `--dry-run` to preview the allocation. Other profiles:
 
-```bash
---profile full      # All perception servers (SAM3, GraspNet, PyRoKi, OWL-ViT, SAM2)
---profile minimal   # PyRoKi only (for oracle/privileged evals)
-```
 
-### 2. Set up an LLM proxy
+## vs CaP-X (upstream)
 
-The evaluation harness queries an LLM through a local proxy that exposes an OpenAI-compatible API.
 
-```bash
-# OpenRouter (get a key at openrouter.ai/keys)
-echo "sk-or-v1-your-key-here" > .openrouterkey
-uv run --no-sync --active capx/serving/openrouter_server.py --key-file .openrouterkey --port 8110
-```
+|                             | CaP-X                        | cap-y                               |
+| --------------------------- | ---------------------------- | ----------------------------------- |
+| Install                     | `uv sync` + CUDA (maybe)     | `docker pull` ☁️                    |
+| OpenCV                      | CPU                          | ✅ CUDA (cuDNN, cuBLAS, FAST_MATH)     |
+| Open3D                      | ❌ no aarch64 wheel           | ✅ CUDA + PyTorch ops + RealSense    |
+| JAX                         | CPU (SM 110 kernels missing) | ✅ SM 110 native (built from source) |
+| Time to first robot command | hours                        | minutes                             |
 
-> **Note:** `.openrouterkey` are git-ignored. The default server URL in configs is `http://127.0.0.1:8110/chat/completions`. 
 
-See [docs/configuration.md](docs/configuration.md) for all provider options (OpenRouter, vLLM, custom).
 
-### 3. Run evaluation
 
-```bash
-# Robosuite: single-turn benchmark (100 trials, 12 parallel workers)
-uv run --no-sync --active capx/envs/launch.py \
-    --config-path env_configs/cube_stack/franka_robosuite_cube_stack.yaml \
-    --model "google/gemini-3.1-pro-preview"
+## Docs
 
-# Robosuite: multi-turn with visual differencing
-uv run --no-sync --active capx/envs/launch.py \
-    --config-path env_configs/cube_stack/franka_robosuite_cube_stack_multiturn_vdm.yaml \
-    --model "google/gemini-3.1-pro-preview"
 
-# LIBERO-PRO: spatial task (requires .venv-libero)
-source .venv-libero/bin/activate
-uv run --no-sync --active capx/envs/launch.py \
-    --config-path env_configs/libero/franka_libero_spatial_0.yaml \
-    --model "google/gemini-3.1-pro-preview"
+| File                                                                   | What                                  |
+| ---------------------------------------------------------------------- | ------------------------------------- |
+| [docker/OPTIMISATIONS.md](docker/OPTIMISATIONS.md)                     | Optimisations relevant to Jetson Thor |
+| [.claude/CLAUDE.md](.claude/CLAUDE.md)                                 | Agent/dev docs                        |
+| [scripts/test_cuda_acceleration.py](scripts/test_cuda_acceleration.py) | CUDA test suite                       |
 
-# BEHAVIOR: R1Pro radio pickup (20 trials) — requires b1k venv
-source capx/third_party/b1k/.venv/bin/activate
-OMNI_KIT_ACCEPT_EULA=YES OMNIGIBSON_HEADLESS=1 \
-uv run --no-sync --active capx/envs/launch.py \
-    --config-path env_configs/r1pro/r1pro_pick_up_radio.yaml \
-    --model "google/gemini-3.1-pro-preview"
 
-# Interactive Web UI
-uv run --no-sync --active capx/envs/launch.py \
-    --config-path env_configs/cube_stack/franka_robosuite_cube_stack.yaml \
-    --web-ui True
-# Open http://localhost:8200
+For upstream CaP-X docs (environments, APIs, RL training): [github.com/capgym/cap-x](https://github.com/capgym/cap-x)
 
-# Regression tests
-./scripts/regression_test.sh quick    # 10-trial smoke test (~30s)
-./scripts/regression_test.sh test1    # Full single-turn (~3 min)
-```
 
-> **Tip (BEHAVIOR):** Isaac Sim uses `OMNIGIBSON_GPU_ID` (not `CUDA_VISIBLE_DEVICES`) to select the GPU. For best performance on multi-GPU systems, run perception servers on a separate GPU (e.g. `OMNIGIBSON_GPU_ID=0` for the eval, and pre-launch SAM3/GraspNet with `CUDA_VISIBLE_DEVICES=1`). Set `OMNI_KIT_ACCEPT_EULA=YES` and `OMNIGIBSON_HEADLESS=1` for headless evaluation.
 
----
 
-## Documentation
-
-| Guide | Contents |
-| ----- | -------- |
-| [Adding Environments](docs/adding-environments.md) | Creating simulators, task environments, YAML configs |
-| [Adding APIs](docs/adding-apis.md) | Implementing and registering new robot control APIs |
-| [Configuration](docs/configuration.md) | YAML format, CLI flags, LLM provider setup |
-| [LIBERO-PRO Tasks](docs/libero-tasks.md) | Setup, running any of 130+ LIBERO tasks, suite reference |
-| [BEHAVIOR Tasks](docs/behavior-tasks.md) | Setup, R1Pro tasks, expected baselines, environment variables |
-| [Development](docs/development.md) | Testing, linting, LIBERO/GraspNet setup, checkpoints, known issues |
-| [Real-World Franka Panda Bringup](docs/real-franka.md) | Bringup with robots_realtime, real-robot QuickStart |
-| [RL Training](docs/rl-training.md) | CaP-RL with GRPO/VeRL, sim-to-real transfer |
-| [Skill Library Compilation](scripts/skill_library_compilation/README.md) | Analyze eval outputs, compile reusable skill libraries |
-
----
 
 ## Citation
+
+If cap-y saved you from compiling OpenCV at 3 AM, cite the original work that made it possible:
 
 ```bibtex
 @article{fu2025capx,
   title     = {{CaP-X}: A Framework for Benchmarking and Improving Coding Agents for Robot Manipulation},
-  author    = {Fu, Max and Yu, Justin and El-Refai, Karim and Kou, Ethan and Xue, Haoru and Huang, Huang and Xiao, Wenli and Wang, Guanzhi and Li, Fei-Fei and Shi, Guanya and Wu, Jiajun and Sastry, Shankar and Zhu, Yuke and Goldberg, Ken and Fan, Jim},
+  author    = {Fu, Max and Yu, Justin and El-Refai, Karim and Kou, Ethan and Xue, Haoru and others},
   journal   = {arXiv preprint arXiv:2603.22435},
-  year      = {2025},
-  url       = {https://arxiv.org/abs/2603.22435}
+  year      = {2025}
 }
 ```
 
 ## License
 
-This project is released under the [MIT License](LICENSE).
+Upstream CaP-X: MIT. Docker additions: MIT. Individual packages: see container family table.
+
+Hope you have a good day, Seva
+
+Built with 🐾 by [sobaka.dev](https://sobaka.dev)
