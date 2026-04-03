@@ -15,25 +15,33 @@ if ! docker info 2>/dev/null | grep -qE 'Runtimes.*nvidia|nvidia.*Runtimes'; the
   exit 1
 fi
 
-# Detect GPU
-ARCH=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d '[:space:]') || true
+# Detect GPU compute capability via nvidia-smi
+ARCH=""
+GPU_NAME=""
+if command -v nvidia-smi &>/dev/null && nvidia-smi &>/dev/null; then
+  ARCH=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d '[:space:]')
+  GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
+fi
 if [[ -z "$ARCH" ]]; then
   echo "WARNING: Could not detect GPU. Defaulting to sm_110 (Jetson Thor)"
   ARCH="11.0"
 fi
-echo "  GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || echo 'unknown') (sm_${ARCH//./_})"
+echo "  GPU: ${GPU_NAME:-unknown} (sm_${ARCH//./_})"
 
 # Pull or build
 echo ""
-echo "  Pulling cap-y:latest..."
-if docker pull ghcr.io/sevapru/cap-y:latest 2>/dev/null; then
+if docker image inspect cap-y:latest &>/dev/null; then
+  echo "  cap-y:latest already exists locally ✓"
+elif docker pull ghcr.io/sevapru/cap-y:latest 2>/dev/null; then
   docker tag ghcr.io/sevapru/cap-y:latest cap-y:latest
   echo "  Pulled from ghcr.io ✓"
 else
   echo "  Pre-built image not available for your platform. Building from source..."
+  echo "  This takes 2-3 hours on first build. Grab some coffee ☕"
   TMPDIR=$(mktemp -d)
   trap "rm -rf $TMPDIR" EXIT
-  git clone --recurse-submodules https://github.com/sevapru/cap-y "$TMPDIR/cap-y"
+  git clone --recurse-submodules --shallow-submodules --depth 1 \
+    https://github.com/sevapru/cap-y "$TMPDIR/cap-y"
   cd "$TMPDIR/cap-y/docker"
   ./build.sh --arch "$ARCH"
 fi
