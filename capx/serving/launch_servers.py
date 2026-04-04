@@ -89,6 +89,13 @@ SERVER_REGISTRY: dict[str, dict[str, Any]] = {
         "gpu_memory_mb": 2000,
         "extra_args": {},
     },
+    "gateway": {
+        "target": "capx.serving.gateway",
+        "default_port": 8100,
+        "gpu_required": False,
+        "gpu_memory_mb": 0,
+        "extra_args": {},
+    },
 }
 
 # Reverse lookup: _target_ module string -> short name
@@ -101,6 +108,10 @@ _TARGET_TO_NAME: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 PROFILES: dict[str, list[dict[str, Any]]] = {
+    "open": [
+        {"server": "gateway", "port": 8100},
+        {"server": "sam3", "port": 8114},
+    ],
     "default": [
         {"server": "sam3", "port": 8114},
         {"server": "graspnet", "port": 8115},
