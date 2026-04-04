@@ -55,6 +55,8 @@ services:
     init: true
     profiles: ["open", "all"]
     ports:
+      - "8100:8100"    # Serving gateway
+      - "8200:8200"    # Web UI
       - "8110:8110"
       - "8113:8113"
       - "8114:8114"
@@ -116,6 +118,35 @@ services:
       - capx-ccache:/root/.ccache
     restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # cap-y:dev — all extras, both sim venvs, no cache cleaned (development only)
+  # ---------------------------------------------------------------------------
+  cap-y-dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+      args:
+        BASE_IMAGE: cap-y:base
+    image: cap-y:dev
+    runtime: nvidia
+    shm_size: "16g"
+    init: true
+    stdin_open: true
+    tty: true
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HF_HOME=/data/huggingface
+      - CUDA_HOME=/usr/local/cuda
+      - MUJOCO_GL=egl
+      - CAPX_PROFILE=${CAPX_PROFILE:-open}
+    volumes:
+      - ..:/workspace
+      - ${HOME}/.cache/huggingface:/data/huggingface
+      - capx-uv-cache:/root/.cache/uv
+      - capx-ccache:/root/.ccache
+
   capx-base:
     image: cap-y:latest
     runtime: nvidia
@@ -124,6 +155,12 @@ services:
     stdin_open: true
     tty: true
     entrypoint: /bin/bash
+    ports:
+      - "8100:8100"    # Serving gateway (all backends aggregated)
+      - "8200:8200"    # Web UI (FastAPI + React)
+      - "8110:8110"    # OpenRouter LLM proxy
+      - "8114:8114"    # SAM3
+      - "8116:8116"    # PyRoKi
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
@@ -182,6 +219,19 @@ services:
       - ROS_DISTRO=jazzy
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
     command: ["/workspace/scripts/test_container_nvidia.py"]
+
+  capx-test-dev:
+    image: cap-y:dev
+    runtime: nvidia
+    entrypoint: python
+    profiles: ["test-dev"]
+    volumes:
+      - ..:/workspace
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - MUJOCO_GL=egl
+    command: ["-m", "pytest", "tests/test_capx.py", "-v", "--tb=short"]
 
 volumes:
   capx-uv-cache:
