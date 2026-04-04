@@ -3,6 +3,7 @@ import { useTrialState } from './hooks/useTrialState';
 import { ConfigStartControl } from './components/ConfigStartControl';
 import { ChatPanel } from './components/ChatPanel';
 import { VisualizationPanel } from './components/VisualizationPanel';
+import { ServerStatus } from './components/ServerStatus';
 
 const FALLBACK_CONFIG = 'env_configs/cube_stack/franka_robosuite_cube_stack.yaml';
 
@@ -15,6 +16,8 @@ function App() {
   const [executionTimeout, setExecutionTimeout] = useState(180);
   const [hasCheckedSession, setHasCheckedSession] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showServers, setShowServers] = useState(false);
+  const [gatewayUrl, setGatewayUrl] = useState('http://127.0.0.1:8100');
 
   // Resizable panel
   const [splitPercent, setSplitPercent] = useState(60);
@@ -211,6 +214,22 @@ function App() {
               {isRunning && <div className="w-12 h-0.5 rounded-full bg-accent/30 overflow-hidden"><div className="h-full w-1/2 bg-accent rounded-full animate-[slideIn_1s_ease-in-out_infinite_alternate]" /></div>}
             </div>
 
+            {/* Servers toggle */}
+            <button
+              onClick={() => setShowServers(!showServers)}
+              className={`p-2.5 rounded-md transition-all duration-150 ${
+                showServers
+                  ? 'bg-surface-overlay text-accent border border-accent/20'
+                  : 'text-text-tertiary hover:text-text-primary hover:bg-surface-overlay border border-transparent'
+              }`}
+              title="Server Status"
+              aria-label="Server Status"
+            >
+              <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 003 3h4.5a3 3 0 003-3m-3 3v2.25m-3.75-2.25H5.25m3 3v2.25m-3 0h6m3.75-14.25h.75m-13.5 5.25H3m18 0h-.75M3 12h18" />
+              </svg>
+            </button>
+
             {/* Settings Gear */}
             <div className="relative" ref={settingsRef}>
             <button
@@ -360,12 +379,15 @@ function App() {
           </div>
         </div>
 
-        {/* Right Panel - Visualization */}
+        {/* Right Panel - Visualization or Server Status */}
         <div
           className="flex flex-col bg-surface-raised overflow-hidden"
           style={{ width: `${100 - splitPercent}%` }}
         >
-          <VisualizationPanel trialState={trial.state} />
+          {showServers
+            ? <ServerStatus gatewayUrl={gatewayUrl} />
+            : <VisualizationPanel trialState={trial.state} />
+          }
         </div>
       </main>
     </div>
