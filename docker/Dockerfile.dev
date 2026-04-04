@@ -1,0 +1,43 @@
+ARG BASE_IMAGE=cap-y:base
+FROM ${BASE_IMAGE}
+
+# cap-y:dev — all extras, both sim venvs, no cache cleaned
+# Not for production — build size is large, caches retained for iteration speed.
+# Build: ./build.sh --dev [--arch 11.0]
+
+# Step D1 — dev Python tools + CUDA extensions (system Python)
+# Installs dev, curobo, contactgraspnet, ovdet extras on top of base
+# libero and robosuite are mutually exclusive — they go in separate venvs below
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.ccache \
+    SETUPTOOLS_SCM_PRETEND_VERSION=0.7.0 \
+    uv pip install --system --no-build-isolation \
+      ".[dev,curobo,contactgraspnet,ovdet]"
+
+# Step D2 — robosuite venv at /opt/venv-robosuite
+# Uses --system-site-packages to inherit CUDA PyTorch, OpenCV, Open3D from base
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.ccache \
+    uv venv /opt/venv-robosuite --python python3.12 --system-site-packages && \
+    SETUPTOOLS_SCM_PRETEND_VERSION=0.7.0 \
+    uv pip install --python /opt/venv-robosuite/bin/python \
+      --no-build-isolation ".[robosuite,contactgraspnet]" || \
+    echo "WARNING: robosuite venv had errors (check network or deps)"
+
+# Step D3 — libero venv at /opt/venv-libero
+# robosuite and LIBERO have conflicting dependency sets — requires a separate venv
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.ccache \
+    uv venv /opt/venv-libero --python python3.12 --system-site-packages && \
+    patch-pyproject.sh pyproject.toml && \
+    SETUPTOOLS_SCM_PRETEND_VERSION=0.7.0 \
+    uv pip install --python /opt/venv-libero/bin/python \
+      --no-build-isolation ".[libero,contactgraspnet]" || \
+    echo "WARNING: libero venv had errors (check network or deps)"
+
+# Step D4 — convenience aliases
+RUN echo 'alias activate-robosuite="source /opt/venv-robosuite/bin/activate"' >> /root/.bashrc && \
+    echo 'alias activate-libero="source /opt/venv-libero/bin/activate"' >> /root/.bashrc
+
+# NOTE: No CLEAN_CACHES step — caches are intentionally kept for iteration speed.
+# cap-y:dev is not intended for production deployment.
