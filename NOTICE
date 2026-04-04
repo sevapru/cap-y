@@ -214,12 +214,6 @@ LiveKit Python SDK + Agents + Silero
   License : Apache 2.0
   URL     : https://github.com/livekit/python-sdks/blob/main/LICENSE
 
-Newton (Apache 2.0) — GPU-accelerated physics, replaces IsaacGym for training
-  License : Apache 2.0 (Linux Foundation governance)
-  URL     : https://newton-physics.github.io/newton/
-  Note    : Built on NVIDIA Warp (warp-lang >= 1.10). Supports aarch64 + CUDA 13 + SM 110.
-            DemoGrasp training migration from IsaacGym to Newton is a ROADMAP task.
-
 dfx_inspire_service — Unitree Inspire RH56DFX ROS2 hand controller
   License : BSD 3-Clause
   URL     : https://github.com/unitreerobotics/dfx_inspire_service

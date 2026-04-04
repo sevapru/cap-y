@@ -285,7 +285,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     git clone --depth 1 https://github.com/correlllab/rh56_controller /opt/rh56_controller && \
     uv pip install --system mujoco pyserial scipy && \
-    uv pip install --system -e /opt/rh56_controller --no-build-isolation || true
+    uv pip install --system -e /opt/rh56_controller --no-build-isolation || \
+      echo "WARNING: rh56_controller editable install failed; fallback deps already installed"
 
 # DemoGrasp (MIT) — universal dexterous grasping from a single demonstration
 # Inference only by default; supports Inspire hand with pre-trained checkpoints.
@@ -303,6 +304,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
       echo "INFO: Skipping DemoGrasp (WITH_DEMOGRASP=0)"; \
     fi
 
+RUN if [ "${WITH_DEMOGRASP}" != "1" ]; then mkdir -p /opt/demograsp; fi
 ENV PYTHONPATH="/opt/demograsp:${PYTHONPATH}"
 
 # Newton (Apache 2.0) — GPU-accelerated physics engine (Google DeepMind + NVIDIA + Disney)
@@ -313,13 +315,13 @@ ENV PYTHONPATH="/opt/demograsp:${PYTHONPATH}"
 # Reference: https://newton-physics.github.io/newton/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system "newton[torch-cu13]" || \
-    (echo "INFO: Newton pip install failed on $(uname -m); trying source build of warp-lang first" && \
-     git clone --depth 1 https://github.com/NVIDIA/warp.git /tmp/warp-build && \
-     cd /tmp/warp-build && \
-     python3 build_lib.py && \
-     uv pip install --system . && \
-     rm -rf /tmp/warp-build && \
-     uv pip install --system "newton[torch-cu13]")
+    { echo "INFO: Newton pip install failed on $(uname -m); trying source build of warp-lang first" && \
+      git clone --depth 1 https://github.com/NVIDIA/warp.git /tmp/warp-build && \
+      cd /tmp/warp-build && \
+      python3 build_lib.py && \
+      uv pip install --system . && \
+      rm -rf /tmp/warp-build && \
+      uv pip install --system "newton[torch-cu13]"; }
 
 ARG CLEAN_CACHES=0
 RUN if [ "${CLEAN_CACHES}" = "1" ]; then \
@@ -333,6 +335,7 @@ WORKDIR /workspace
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# ContactGraspNet (8115) is in cap-y:default only — not installed in this base image
 EXPOSE 8100 8110 8113 8114 8116 8119 8120
 
 ENTRYPOINT ["/entrypoint.sh"]

@@ -3,12 +3,13 @@
 # Source: https://github.com/BeingBeyond/DemoGrasp#requirements
 # Link: https://drive.google.com/drive/folders/1NXDcMI5IXalOwauryWvXCz3h2n2IzBQ6?usp=sharing
 set -euo pipefail
-pip install --quiet gdown
+uv pip install --system --quiet gdown
 DEST="${1:-/opt/demograsp}"
 gdown --folder "https://drive.google.com/drive/folders/1NXDcMI5IXalOwauryWvXCz3h2n2IzBQ6" -O "$DEST/"
 cd "$DEST"
-for z in ckpt.zip robots.zip union_ycb_unidex.zip textures.zip; do
-  [ -f "$z" ] && unzip -qo "$z" && rm "$z"
+for z in *.zip; do
+  [ -f "$z" ] || continue
+  unzip -qo "$z" && rm "$z" || echo "WARNING: failed to extract $z"
 done
 echo "DemoGrasp assets ready at $DEST"
 # Expected structure:
