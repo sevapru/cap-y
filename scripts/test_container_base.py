@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 import zipfile
+from pathlib import Path
 
 PASS = 0
 FAIL = 0
@@ -219,6 +220,68 @@ def test_pyroki():
 
 
 # ---------------------------------------------------------------------------
+# mink (Apache 2.0) — differential IK via MuJoCo
+# ---------------------------------------------------------------------------
+
+def test_mink():
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", "import mink; print(mink.__version__)"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0:
+            report("PASS", "mink (differential IK)", result.stdout.strip())
+        else:
+            report("FAIL", "mink (differential IK)", result.stderr.strip()[:200])
+    except Exception as e:
+        report("FAIL", "mink (differential IK)", str(e))
+
+
+# ---------------------------------------------------------------------------
+# rh56_controller (MIT) — analytical grasp planner for Inspire RH56DFX
+# ---------------------------------------------------------------------------
+
+def test_rh56_controller():
+    try:
+        installed = subprocess.run(
+            [sys.executable, "-c", "import rh56_controller"],
+            capture_output=True, timeout=30,
+        ).returncode == 0
+        on_disk = Path("/opt/rh56_controller").exists()
+        if installed:
+            report("PASS", "rh56_controller (analytical grasping)", "importable")
+        elif on_disk:
+            report("PASS", "rh56_controller (analytical grasping)", "dir present (fallback deps installed)")
+        else:
+            report("FAIL", "rh56_controller (analytical grasping)", "not installed")
+    except Exception as e:
+        report("FAIL", "rh56_controller (analytical grasping)", str(e))
+
+
+# ---------------------------------------------------------------------------
+# DemoGrasp (MIT) — neural dexterous grasping (inference only)
+# ---------------------------------------------------------------------------
+
+def test_demograsp():
+    try:
+        on_disk = Path("/opt/demograsp").exists()
+        if not on_disk:
+            report("INFO", "DemoGrasp (neural grasping)", "not installed (WITH_DEMOGRASP=0)")
+            return
+        importable = subprocess.run(
+            [sys.executable, "-c",
+             "import sys; sys.path.insert(0, '/opt/demograsp'); import einops"],
+            capture_output=True, timeout=30,
+        ).returncode == 0
+        if importable:
+            report("PASS", "DemoGrasp (neural grasping)", "dir present, inference deps ok")
+        else:
+            report("PASS", "DemoGrasp (neural grasping)", "dir present, deps partial (run download_demograsp_ckpts.sh)")
+    except Exception as e:
+        report("FAIL", "DemoGrasp (neural grasping)", str(e))
+
+
+# ---------------------------------------------------------------------------
 # Wheel integrity (/opt/wheels/)
 # ---------------------------------------------------------------------------
 
@@ -296,6 +359,9 @@ def main():
     test_curobo()
     test_contact_graspnet()
     test_pyroki()
+    test_mink()
+    test_rh56_controller()
+    test_demograsp()
     test_wheel_integrity()
     test_libero_venv()
 

@@ -19,6 +19,13 @@ if [[ -f pyproject.toml ]]; then
   fi
 fi
 
+# DemoGrasp checkpoint hint (first run only)
+if [ -d /opt/demograsp ] && [ ! -f /opt/demograsp/ckpt/inspire.pt ]; then
+  echo "[entrypoint] DemoGrasp checkpoints not found. Download with:"
+  echo "  bash scripts/download_demograsp_ckpts.sh"
+  echo "  Source: https://github.com/BeingBeyond/DemoGrasp#requirements"
+fi
+
 # If a command was passed (e.g. "bash"), run it instead of servers
 if [[ $# -gt 0 ]]; then
   exec "$@"

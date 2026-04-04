@@ -89,6 +89,35 @@ SERVER_REGISTRY: dict[str, dict[str, Any]] = {
         "gpu_memory_mb": 2000,
         "extra_args": {},
     },
+    "gateway": {
+        "target": "capx.serving.gateway",
+        "default_port": 8100,
+        "gpu_required": False,
+        "gpu_memory_mb": 0,
+        "extra_args": {},
+    },
+    "llm": {
+        "target": "capx.serving.openrouter_server",
+        "default_port": 8110,
+        "gpu_required": False,
+        "gpu_memory_mb": 0,
+        "extra_args": {},
+    },
+    # --- cap-y-open additions (MIT / Apache 2.0 — commercially permissive) ---
+    "demograsp": {
+        "target": "capx.serving.launch_demograsp_server",
+        "default_port": 8119,
+        "gpu_required": True,
+        "gpu_memory_mb": 3000,
+        "extra_args": {"device": "cuda"},
+    },
+    "graspanalytic": {
+        "target": "capx.serving.launch_graspanalytic_server",
+        "default_port": 8120,
+        "gpu_required": False,
+        "gpu_memory_mb": 0,
+        "extra_args": {},
+    },
 }
 
 # Reverse lookup: _target_ module string -> short name
@@ -101,17 +130,46 @@ _TARGET_TO_NAME: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 PROFILES: dict[str, list[dict[str, Any]]] = {
-    "default": [
+    # Commercially-permissive profile (MIT / Apache 2.0 only).
+    # Requires cap-y:base or cap-y:open image.
+    "open": [
+        {"server": "gateway", "port": 8100},
+        {"server": "llm", "port": 8110},
         {"server": "sam3", "port": 8114},
-        {"server": "graspnet", "port": 8115},
         {"server": "pyroki", "port": 8116},
+        {"server": "demograsp", "port": 8119},
+        {"server": "graspanalytic", "port": 8120},
     ],
-    "full": [
+    # NVIDIA NC license profile — research/internal use only.
+    "default": [
+        {"server": "gateway", "port": 8100},
+        {"server": "llm", "port": 8110},
         {"server": "sam3", "port": 8114},
         {"server": "graspnet", "port": 8115},
         {"server": "pyroki", "port": 8116},
-        {"server": "owlvit", "port": 8117},
+        {"server": "curobo", "port": 8117},
+    ],
+    # Full stack — all servers; requires cap-y:default (NVIDIA NC).
+    "full": [
+        {"server": "gateway", "port": 8100},
+        {"server": "llm", "port": 8110},
         {"server": "sam2", "port": 8113},
+        {"server": "sam3", "port": 8114},
+        {"server": "graspnet", "port": 8115},
+        {"server": "pyroki", "port": 8116},
+        {"server": "curobo", "port": 8117},
+        {"server": "owlvit", "port": 8118},
+        {"server": "demograsp", "port": 8119},
+        {"server": "graspanalytic", "port": 8120},
+    ],
+    # Isaac ROS profile — mirrors open backends (HTTP wrappers for ROS nodes are ROADMAP).
+    "nvidia": [
+        {"server": "gateway", "port": 8100},
+        {"server": "llm", "port": 8110},
+        {"server": "sam3", "port": 8114},
+        {"server": "pyroki", "port": 8116},
+        {"server": "demograsp", "port": 8119},
+        {"server": "graspanalytic", "port": 8120},
     ],
     "minimal": [
         {"server": "pyroki", "port": 8116},

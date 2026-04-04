@@ -31,15 +31,44 @@ Open3D
   License : MIT
   URL     : https://github.com/isl-org/Open3D/blob/main/LICENSE
   Copyright: 2018-2024 Open3D contributors
+  Note    : Bundled with Open3D-ML (MIT, https://github.com/isl-org/Open3D-ML)
 
 JAX / XLA / jaxlib
   License : Apache 2.0
   URL     : https://github.com/google/jax/blob/main/LICENSE
   Copyright: 2018 Google LLC
 
+ROS 2 Jazzy (rclpy + common message types)
+  License : Apache 2.0
+  URL     : https://github.com/ros2
+  Copyright: Open Source Robotics Foundation
+  Note    : Minimal client only (rclpy, action/nav/trajectory/geometry/sensor/std msgs).
+            Full ROS 2 stack (nav2, moveit2, ros2_control) is in cap-y:open only.
+
+robot_descriptions (URDF fetching at runtime)
+  License : Apache 2.0
+  URL     : https://github.com/robot-descriptions/robot_descriptions.py
+
 RealSense SDK (librealsense2)
   License : Apache 2.0
   URL     : https://github.com/IntelRealSense/librealsense/blob/master/LICENSE
+
+SAM3 (Segment Anything 3)  *** REDISTRIBUTION CONDITIONS APPLY ***
+  License : Meta SAM License (custom, last updated November 19, 2025)
+  URL     : https://github.com/facebookresearch/sam2/blob/main/LICENSE
+  Copyright: Meta Platforms, Inc.
+  Conditions:
+    - Redistribution must be under the same Meta SAM License terms
+    - Publications using SAM3 must acknowledge the use
+    - Must comply with applicable Trade Controls (ITAR, OFAC sanctions)
+    - No reverse engineering of model components
+    - Meta may unilaterally modify license terms
+  See: capx/third_party/sam3/LICENSE
+
+torchvision
+  License : BSD 3-Clause
+  URL     : https://github.com/pytorch/vision/blob/main/LICENSE
+  Copyright: 2016-present Soumith Chintala
 
 pyroki
   License : MIT
@@ -49,7 +78,7 @@ pyroki
 cap-y:default — ADDITIONAL BASE COMPONENTS
 ================================================================================
 
-** USAGE RESTRICTION: cap-y:latest contains components that restrict
+** USAGE RESTRICTION: cap-y:default contains components that restrict
 ** commercial use. See individual entries below.
 
 CaP-X (upstream framework)
@@ -63,18 +92,6 @@ cuRobo  *** NON-COMMERCIAL ONLY ***
   Copyright: 2023 NVIDIA CORPORATION & AFFILIATES
   Note    : See capx/third_party/curobo/LICENSE for full terms.
             For commercial use, contact NVIDIA.
-
-SAM3 (Segment Anything 3)  *** REDISTRIBUTION CONDITIONS APPLY ***
-  License : Meta SAM License (custom, last updated November 19, 2025)
-  URL     : https://github.com/facebookresearch/sam2/blob/main/LICENSE
-  Copyright: Meta Platforms, Inc.
-  Conditions:
-    - Redistribution must be under the same Meta SAM License terms
-    - Publications using SAM3 must acknowledge the use
-    - Must comply with applicable Trade Controls (ITAR, OFAC sanctions)
-    - No reverse engineering of model components
-    - Meta may unilaterally modify license terms
-  See: capx/third_party/sam3/LICENSE
 
 Contact GraspNet (PyTorch port)
   License : No explicit license declared in vendored code (NOASSERTION).
@@ -146,7 +163,13 @@ DemoGrasp — universal dexterous grasping from a single demonstration
              Demonstration"
   Note    : Inference-only by default. Supports Inspire hand natively with
             pre-trained checkpoints (95% success on DexGraspNet, 84.6% across
-            diverse embodiments). Training requires IsaacGym Preview 4 (see below).
+            diverse embodiments). Training migration to Newton is a ROADMAP task.
+
+Newton (Apache 2.0) — GPU-accelerated physics engine (Google DeepMind + NVIDIA + Disney)
+  License : Apache 2.0
+  URL     : https://newton-physics.github.io/newton/
+  Note    : Built on NVIDIA Warp (warp-lang >= 1.10). Supports aarch64 + CUDA 13 + SM 110.
+            Replaces IsaacGym for DemoGrasp training (ROADMAP task).
 
 ================================================================================
 cap-y:default — ADDITIONAL COMPONENTS (NVIDIA NC — non-commercial only)
@@ -190,17 +213,6 @@ Drake (GCS trajectory planning, x86_64 only)
 LiveKit Python SDK + Agents + Silero
   License : Apache 2.0
   URL     : https://github.com/livekit/python-sdks/blob/main/LICENSE
-
-robot_descriptions (URDF fetching at runtime)
-  License : Apache 2.0
-  URL     : https://github.com/robot-descriptions/robot_descriptions.py
-
-DemoGrasp training dependencies (optional — WITH_DEMOGRASP_TRAINING=1 only)
-  IsaacGym Preview 4
-    License : NVIDIA IsaacGym License (NON-COMMERCIAL ONLY)
-    Note    : Only NVIDIA Corporation and its affiliates may use commercially.
-              cap-y-open built with WITH_DEMOGRASP_TRAINING=1 is NOT commercially
-              deployable. Default build (WITH_DEMOGRASP_TRAINING=0) is NOT affected.
 
 dfx_inspire_service — Unitree Inspire RH56DFX ROS2 hand controller
   License : BSD 3-Clause

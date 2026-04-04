@@ -48,6 +48,7 @@ dependencies = [
   "mediapy>=1.2.5",
   "uvicorn",
   "fastapi",
+  "httpx>=0.27",
   "transformers",
   "openai",
   "pyrender",
@@ -191,6 +192,13 @@ nvidia-curobo = ["torch"]
 [tool.uv.workspace]
 exclude = [
     "capx/third_party/b1k",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "servers: requires running perception/grasping/motion servers",
+    "api: requires running API servers and GPU",
+    "simulation: requires GPU, EGL rendering, and simulation extras",
 ]
 
 [tool.ruff]

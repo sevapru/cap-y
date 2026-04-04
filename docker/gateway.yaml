@@ -1,0 +1,59 @@
+# Gateway routing configuration.
+# Each profile maps backend names to functional groups.
+# The gateway loads the profile matching CAPX_PROFILE env var (default: open).
+
+profiles:
+  open:
+    perception:
+      sam3: {port: 8114, desc: "Text/point segmentation (Meta SAM License)"}
+    grasping:
+      demograsp: {port: 8119, desc: "Neural dexterous grasping (MIT, Inspire hand)"}
+      graspanalytic: {port: 8120, desc: "Analytical width-to-grasp planner (MIT, rh56)"}
+    motion:
+      pyroki: {port: 8116, desc: "IK solver (JAX, MIT)"}
+    inference:
+      llm: {port: 8110, desc: "OpenRouter LLM proxy"}
+
+  default:
+    perception:
+      sam3: {port: 8114, desc: "Text/point segmentation"}
+    grasping:
+      graspnet: {port: 8115, desc: "6-DOF grasp from depth (NVlabs NC)"}
+    motion:
+      pyroki: {port: 8116, desc: "IK solver (JAX)"}
+      curobo: {port: 8117, desc: "Collision-free trajectories (NVIDIA NC)"}
+    inference:
+      llm: {port: 8110, desc: "OpenRouter LLM proxy"}
+
+  full:
+    perception:
+      sam3: {port: 8114, desc: "Text/point segmentation"}
+      sam2: {port: 8113, desc: "Interactive mask generation"}
+      owlvit: {port: 8118, desc: "Open-vocab detection"}
+    grasping:
+      graspnet: {port: 8115, desc: "6-DOF grasp from depth"}
+      demograsp: {port: 8119, desc: "Neural dexterous grasping"}
+      graspanalytic: {port: 8120, desc: "Analytical grasp planner"}
+    motion:
+      pyroki: {port: 8116, desc: "IK solver (JAX)"}
+      curobo: {port: 8117, desc: "Collision-free trajectories"}
+    inference:
+      llm: {port: 8110, desc: "OpenRouter LLM proxy"}
+
+  nvidia:
+    # NOTE: cuVSLAM, cuMotion, nvblox are ROS2 nodes (topic-based), not HTTP servers.
+    # FastAPI wrappers do NOT exist yet — see ROADMAP.md for the task to create them.
+    # Until then, nvidia profile reuses the open profile backends.
+    perception:
+      sam3: {port: 8114, desc: "Text/point segmentation"}
+    grasping:
+      demograsp: {port: 8119, desc: "Neural dexterous grasping"}
+      graspanalytic: {port: 8120, desc: "Analytical grasp planner"}
+    motion:
+      pyroki: {port: 8116, desc: "IK solver (JAX)"}
+    inference:
+      llm: {port: 8110, desc: "OpenRouter LLM proxy"}
+    # Future (needs FastAPI wrappers — see ROADMAP.md):
+    # scene: nvblox (ROS2 node -> HTTP bridge needed)
+    # motion: cumotion (ROS2 MoveIt plugin -> HTTP bridge needed)
+    # perception: cuvslam (ROS2 node -> HTTP bridge needed)
