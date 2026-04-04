@@ -46,6 +46,61 @@ Three no non-obvious build details worth knowing:
 If you'd actually compare it with [jetson-containers](https://github.com/dusty-nv/jetson-containers/tree/master?tab=readme-ov-file)  -  There is, mainly, late on-time (cu130) support for containers and, as I would tell you: not enough developers who can provide this builds (so someone should do it). You'll understand how great this set is for 03.04.2026 or later if you'd need to recompile some cores and use anything as a cap-base for your mechanical or hydraulic friendo.
 
 
+## Architecture
+
+### Project Structure
+
+```
+cap-y/
+├── capx/
+│   ├── envs/           # Gymnasium-compatible environments
+│   │   ├── simulators/ # robosuite, LIBERO, real Franka, R1Pro registrations
+│   │   ├── tasks/      # Task implementations (cube stack, nut assembly, LIBERO, …)
+│   │   ├── adapters/   # robosuite_wrapper, libero_wrapper
+│   │   └── launch.py   # Entrypoint: uv run capx/envs/launch.py --config …
+│   ├── integrations/   # Robot + perception API clients
+│   │   ├── franka/     # Franka control stacks (privileged, reduced, skill-lib…)
+│   │   ├── motion/     # pyroki.py, curobo.py — HTTP clients to serving servers
+│   │   └── vision/     # sam2.py, sam3.py, owlvit.py, graspnet.py
+│   ├── serving/        # FastAPI servers (SAM3, PyRoKi, GraspNet, DemoGrasp, …)
+│   ├── skills/         # Skill library (extraction, storage, Claude prompts)
+│   ├── llm/            # LLM client wrapper
+│   └── web/            # FastAPI web UI backend
+├── docker/             # Dockerfile.base, Dockerfile, Dockerfile.open, Dockerfile.nvidia, Dockerfile.dev
+├── env_configs/        # 170 YAML experiment profiles (cube_stack/, libero/, r1pro/, …)
+├── scripts/            # Container tests, install, regression tests
+└── tests/              # pytest suite (Tier 1–4: imports, server health, API, simulation)
+```
+
+### Agent Loop Data Flow
+
+```mermaid
+flowchart LR
+    subgraph serving [Serving Servers]
+        SAM3["SAM3 :8114"]
+        GraspNet["GraspNet :8115"]
+        PyRoKi["PyRoKi :8116"]
+        DemoGrasp["DemoGrasp :8119"]
+    end
+    subgraph agent [Agent Loop]
+        LLM["LLM (OpenRouter)"]
+        Integrations["capx.integrations\n(vision + motion clients)"]
+        Env["capx.envs\n(simulator / real robot)"]
+    end
+    Camera --> SAM3
+    SAM3 --> Integrations
+    Integrations --> GraspNet
+    Integrations --> PyRoKi
+    GraspNet --> Integrations
+    PyRoKi --> Integrations
+    Integrations --> LLM
+    LLM --> Integrations
+    Integrations --> Env
+    Env --> Camera
+```
+
+> **CaP-Agent0** is not a Python package — it is an experiment config label used in `env_configs/libero/franka_libero_cap_agent0.yaml`. The CaP-X paper's agent variants (Agent-0 = code-as-policies baseline, Agent-1 = + skill library, etc.) correspond to YAML config choices, not separate packages.
+
 ## Get Started
 
 The fastest path is via Docker Compose — it handles GPU passthrough, volumes, and environment automatically. Use `capx-base` for interactive exploration without starting any servers:
