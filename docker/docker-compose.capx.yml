@@ -1,13 +1,65 @@
 services:
-  capx-serving:
+
+  # ---------------------------------------------------------------------------
+  # cap-y:base — MIT/Apache/BSD clean foundation
+  # License ceiling: Meta SAM License (SAM3). Commercially deployable.
+  # Default profile: open (DemoGrasp + rh56_controller + SAM3 + PyRoKi)
+  # ---------------------------------------------------------------------------
+  cap-y-base:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.base
+      args:
+        CUDA_ARCH_BIN: "${CUDA_ARCH_BIN:-11.0}"
+        OPENCV_VERSION: "${OPENCV_VERSION:-4.13.0}"
+        WITH_DEMOGRASP: "${WITH_DEMOGRASP:-1}"
+        WITH_DEMOGRASP_TRAINING: "${WITH_DEMOGRASP_TRAINING:-0}"
+    image: cap-y:base
+    runtime: nvidia
+    shm_size: "8g"
+    init: true
+    ports:
+      - "8110:8110"    # OpenRouter LLM proxy
+      - "8114:8114"    # SAM3
+      - "8116:8116"    # PyRoKi IK
+      - "8119:8119"    # DemoGrasp (MIT)
+      - "8120:8120"    # GraspAnalytic / rh56_controller (MIT)
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HF_HOME=/data/huggingface
+      - CUDA_HOME=/usr/local/cuda
+      - CAPX_PROFILE=${CAPX_PROFILE:-open}
+      - CAPX_HOST=0.0.0.0
+      - MUJOCO_GL=egl
+      - DEMOGRASP_CHECKPOINT=${DEMOGRASP_CHECKPOINT:-}
+    volumes:
+      - ..:/workspace
+      - ${HOME}/.cache/huggingface:/data/huggingface
+      - capx-uv-cache:/root/.cache/uv
+      - capx-ccache:/root/.ccache
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8114/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # cap-y:default — + cuRobo + ContactGraspNet (NVIDIA NC license)
+  # Commercial use: NOT permitted without separate NVIDIA licensing.
+  # Default profile: default (SAM3 + ContactGraspNet + PyRoKi)
+  # ---------------------------------------------------------------------------
+  cap-y-default:
     build:
       context: ..
       dockerfile: docker/Dockerfile
       args:
+        BASE_IMAGE: cap-y:base
         CUDA_ARCH_BIN: "${CUDA_ARCH_BIN:-11.0}"
-        OPENCV_VERSION: "${OPENCV_VERSION:-4.13.0}"
-    image: cap-y:latest
-
+    image: cap-y:default
     runtime: nvidia
     shm_size: "8g"
     init: true
@@ -16,7 +68,7 @@ services:
       - "8113:8113"    # SAM2 (full profile)
       - "8114:8114"    # SAM3
       - "8115:8115"    # ContactGraspNet
-      - "8116:8116"    # PyRoKi
+      - "8116:8116"    # PyRoKi IK
       - "8117:8117"    # OWL-ViT (full profile)
       - "8118:8118"    # CuRobo (custom profile)
     environment:
@@ -41,39 +93,40 @@ services:
       start_period: 120s
     restart: unless-stopped
 
-  capx-open:
+  # ---------------------------------------------------------------------------
+  # cap-y:open — + ROS2 full stack + dfx_inspire_service
+  # Builds FROM cap-y:base (inherits mink, rh56, DemoGrasp).
+  # License ceiling: Meta SAM License. Commercially deployable.
+  # ---------------------------------------------------------------------------
+  cap-y-open:
     build:
       context: ..
       dockerfile: docker/Dockerfile.open
       args:
-        BASE_IMAGE: cap-y:latest
+        BASE_IMAGE: cap-y:base
         CUDA_ARCH_BIN: "${CUDA_ARCH_BIN:-11.0}"
-    image: cap-y-open:latest
-
+    image: cap-y:open
     runtime: nvidia
     shm_size: "8g"
     init: true
     profiles: ["open", "all"]
     ports:
-      - "8100:8100"    # Serving gateway
-      - "8200:8200"    # Web UI
       - "8110:8110"
-      - "8113:8113"
-      - "8114:8114"
-      - "8115:8115"
-      - "8116:8116"
-      - "8117:8117"
-      - "8118:8118"
+      - "8114:8114"    # SAM3
+      - "8116:8116"    # PyRoKi IK
+      - "8119:8119"    # DemoGrasp (MIT)
+      - "8120:8120"    # GraspAnalytic / rh56_controller (MIT)
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
       - HF_TOKEN=${HF_TOKEN:-}
       - HF_HOME=/data/huggingface
       - CUDA_HOME=/usr/local/cuda
-      - CAPX_PROFILE=${CAPX_PROFILE:-default}
+      - CAPX_PROFILE=${CAPX_PROFILE:-open}
       - CAPX_HOST=0.0.0.0
       - MUJOCO_GL=egl
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - DEMOGRASP_CHECKPOINT=${DEMOGRASP_CHECKPOINT:-}
     volumes:
       - ..:/workspace
       - ${HOME}/.cache/huggingface:/data/huggingface
@@ -81,36 +134,38 @@ services:
       - capx-ccache:/root/.ccache
     restart: unless-stopped
 
-  capx-nvidia:
+  # ---------------------------------------------------------------------------
+  # cap-y:nvidia — + Isaac ROS cuMotion + cuVSLAM + ScheduleStream
+  # Builds FROM cap-y:open. Requires NVIDIA Source Code License Agreement.
+  # ---------------------------------------------------------------------------
+  cap-y-nvidia:
     build:
       context: ..
       dockerfile: docker/Dockerfile.nvidia
       args:
-        BASE_IMAGE: cap-y-open:latest
-    image: cap-y-nvidia:latest
-
+        BASE_IMAGE: cap-y:open
+    image: cap-y:nvidia
     runtime: nvidia
     shm_size: "8g"
     init: true
     profiles: ["nvidia", "all"]
     ports:
       - "8110:8110"
-      - "8113:8113"
       - "8114:8114"
-      - "8115:8115"
       - "8116:8116"
-      - "8117:8117"
-      - "8118:8118"
+      - "8119:8119"
+      - "8120:8120"
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
       - HF_TOKEN=${HF_TOKEN:-}
       - HF_HOME=/data/huggingface
       - CUDA_HOME=/usr/local/cuda
-      - CAPX_PROFILE=${CAPX_PROFILE:-default}
+      - CAPX_PROFILE=${CAPX_PROFILE:-open}
       - CAPX_HOST=0.0.0.0
       - MUJOCO_GL=egl
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - DEMOGRASP_CHECKPOINT=${DEMOGRASP_CHECKPOINT:-}
     volumes:
       - ..:/workspace
       - ${HOME}/.cache/huggingface:/data/huggingface
@@ -119,48 +174,16 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # cap-y:dev — all extras, both sim venvs, no cache cleaned (development only)
+  # capx-base — interactive bash shell (uses cap-y:base, no servers)
   # ---------------------------------------------------------------------------
-  cap-y-dev:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.dev
-      args:
-        BASE_IMAGE: cap-y:base
-    image: cap-y:dev
-    runtime: nvidia
-    shm_size: "16g"
-    init: true
-    stdin_open: true
-    tty: true
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=all
-      - HF_TOKEN=${HF_TOKEN:-}
-      - HF_HOME=/data/huggingface
-      - CUDA_HOME=/usr/local/cuda
-      - MUJOCO_GL=egl
-      - CAPX_PROFILE=${CAPX_PROFILE:-open}
-    volumes:
-      - ..:/workspace
-      - ${HOME}/.cache/huggingface:/data/huggingface
-      - capx-uv-cache:/root/.cache/uv
-      - capx-ccache:/root/.ccache
-
   capx-base:
-    image: cap-y:latest
+    image: cap-y:base
     runtime: nvidia
     shm_size: "8g"
     init: true
     stdin_open: true
     tty: true
     entrypoint: /bin/bash
-    ports:
-      - "8100:8100"    # Serving gateway (all backends aggregated)
-      - "8200:8200"    # Web UI (FastAPI + React)
-      - "8110:8110"    # OpenRouter LLM proxy
-      - "8114:8114"    # SAM3
-      - "8116:8116"    # PyRoKi
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
@@ -174,9 +197,11 @@ services:
       - capx-uv-cache:/root/.cache/uv
       - capx-ccache:/root/.ccache
 
+  # ---------------------------------------------------------------------------
+  # Test services
+  # ---------------------------------------------------------------------------
   capx-test:
-    image: cap-y:latest
-    container_name: cap-y-test
+    image: cap-y:base
     runtime: nvidia
     entrypoint: python
     profiles: ["test"]
@@ -189,8 +214,7 @@ services:
     command: ["/workspace/scripts/test_container_base.py"]
 
   capx-test-open:
-    image: cap-y-open:latest
-    container_name: cap-y-test-open
+    image: cap-y:open
     runtime: nvidia
     entrypoint: python
     profiles: ["test-open"]
@@ -205,8 +229,7 @@ services:
     command: ["/workspace/scripts/test_container_open.py"]
 
   capx-test-nvidia:
-    image: cap-y-nvidia:latest
-    container_name: cap-y-test-nvidia
+    image: cap-y:nvidia
     runtime: nvidia
     entrypoint: python
     profiles: ["test-nvidia"]
@@ -219,19 +242,6 @@ services:
       - ROS_DISTRO=jazzy
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
     command: ["/workspace/scripts/test_container_nvidia.py"]
-
-  capx-test-dev:
-    image: cap-y:dev
-    runtime: nvidia
-    entrypoint: python
-    profiles: ["test-dev"]
-    volumes:
-      - ..:/workspace
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=all
-      - MUJOCO_GL=egl
-    command: ["-m", "pytest", "tests/test_capx.py", "-v", "--tb=short"]
 
 volumes:
   capx-uv-cache:
