@@ -17,7 +17,7 @@
 #
 # Everything from capx-open is inherited (ROS 2, Nav2, MoveIt 2, Drake, etc.)
 
-ARG BASE_IMAGE=cap-y-open:latest
+ARG BASE_IMAGE=cap-y:open
 FROM ${BASE_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive \
