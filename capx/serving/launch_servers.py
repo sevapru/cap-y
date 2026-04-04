@@ -96,6 +96,21 @@ SERVER_REGISTRY: dict[str, dict[str, Any]] = {
         "gpu_memory_mb": 0,
         "extra_args": {},
     },
+    # --- cap-y-open additions (MIT / Apache 2.0 — commercially permissive) ---
+    "demograsp": {
+        "target": "capx.serving.launch_demograsp_server",
+        "default_port": 8119,
+        "gpu_required": True,
+        "gpu_memory_mb": 3000,
+        "extra_args": {"device": "cuda"},
+    },
+    "graspanalytic": {
+        "target": "capx.serving.launch_graspanalytic_server",
+        "default_port": 8120,
+        "gpu_required": False,
+        "gpu_memory_mb": 0,
+        "extra_args": {},
+    },
 }
 
 # Reverse lookup: _target_ module string -> short name
@@ -111,6 +126,9 @@ PROFILES: dict[str, list[dict[str, Any]]] = {
     "open": [
         {"server": "gateway", "port": 8100},
         {"server": "sam3", "port": 8114},
+        {"server": "pyroki", "port": 8116},
+        {"server": "demograsp", "port": 8119},
+        {"server": "graspanalytic", "port": 8120},
     ],
     "default": [
         {"server": "sam3", "port": 8114},

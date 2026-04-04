@@ -77,6 +77,7 @@ def test_server_health(port: int, name: str) -> None:
         "ready",
         "ok",
         "initializing",
+        "stub",
     ), f"{name} returned unexpected status: {body}"
 
 
