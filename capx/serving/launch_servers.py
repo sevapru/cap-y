@@ -96,6 +96,13 @@ SERVER_REGISTRY: dict[str, dict[str, Any]] = {
         "gpu_memory_mb": 0,
         "extra_args": {},
     },
+    "llm": {
+        "target": "capx.serving.openrouter_server",
+        "default_port": 8110,
+        "gpu_required": False,
+        "gpu_memory_mb": 0,
+        "extra_args": {},
+    },
     # --- cap-y-open additions (MIT / Apache 2.0 — commercially permissive) ---
     "demograsp": {
         "target": "capx.serving.launch_demograsp_server",
@@ -123,24 +130,46 @@ _TARGET_TO_NAME: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 PROFILES: dict[str, list[dict[str, Any]]] = {
+    # Commercially-permissive profile (MIT / Apache 2.0 only).
+    # Requires cap-y:base or cap-y:open image.
     "open": [
         {"server": "gateway", "port": 8100},
+        {"server": "llm", "port": 8110},
         {"server": "sam3", "port": 8114},
         {"server": "pyroki", "port": 8116},
         {"server": "demograsp", "port": 8119},
         {"server": "graspanalytic", "port": 8120},
     ],
+    # NVIDIA NC license profile — research/internal use only.
     "default": [
+        {"server": "gateway", "port": 8100},
+        {"server": "llm", "port": 8110},
         {"server": "sam3", "port": 8114},
         {"server": "graspnet", "port": 8115},
         {"server": "pyroki", "port": 8116},
+        {"server": "curobo", "port": 8117},
     ],
+    # Full stack — all servers; requires cap-y:default (NVIDIA NC).
     "full": [
+        {"server": "gateway", "port": 8100},
+        {"server": "llm", "port": 8110},
+        {"server": "sam2", "port": 8113},
         {"server": "sam3", "port": 8114},
         {"server": "graspnet", "port": 8115},
         {"server": "pyroki", "port": 8116},
-        {"server": "owlvit", "port": 8117},
-        {"server": "sam2", "port": 8113},
+        {"server": "curobo", "port": 8117},
+        {"server": "owlvit", "port": 8118},
+        {"server": "demograsp", "port": 8119},
+        {"server": "graspanalytic", "port": 8120},
+    ],
+    # Isaac ROS profile — mirrors open backends (HTTP wrappers for ROS nodes are ROADMAP).
+    "nvidia": [
+        {"server": "gateway", "port": 8100},
+        {"server": "llm", "port": 8110},
+        {"server": "sam3", "port": 8114},
+        {"server": "pyroki", "port": 8116},
+        {"server": "demograsp", "port": 8119},
+        {"server": "graspanalytic", "port": 8120},
     ],
     "minimal": [
         {"server": "pyroki", "port": 8116},

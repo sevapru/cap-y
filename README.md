@@ -115,18 +115,6 @@ docker compose -f docker/docker-compose.capx.yml run --rm capx-serving bash
 
 The entrypoint runs an editable install of the package on every start so code changes in `/workspace` are picked up immediately without a rebuild. Pass any command to override the default server launch.
 
-## Pre-built Wheels
-
-Index: [wheels.sobaka.dev](https://wheels.sobaka.dev)
-
-Pre-built wheels for Jetson Platform
-Tested on **Jetson Thor aarch64, Python 3.12, CUDA 13.0, SM 110**.
-
-```bash
-uv pip install --extra-index-url https://wheels.sobaka.dev/ \
-  jaxlib jax-cuda13-plugin jax-cuda13-pjrt
-```
-
 ### Pull & Run
 
 All four images are available from GHCR as tags on `ghcr.io/sevapru/cap-y`:
@@ -347,17 +335,20 @@ docker build -f docker/Dockerfile.nvidia --build-arg BASE_IMAGE=cap-y:open -t ca
 ## Ports
 
 
-| Port | Service                | When      |
-| ---- | ---------------------- | --------- |
-| 8110 | LLM proxy (OpenRouter) | always    |
-| 8113 | SAM2                   | `full`    |
-| 8114 | SAM3                   | `default` |
-| 8115 | ContactGraspNet        | `default` |
-| 8116 | PyRoKi IK              | `default` |
-| 8117 | OWL-ViT                | `full`    |
-| 8118 | CuRobo                 | custom    |
-| 8119 | DemoGrasp              | `open`    |
-| 8120 | GraspAnalytic (rh56)   | `open`    |
+| Port | Service                | Profile(s)             |
+| ---- | ---------------------- | ---------------------- |
+| 8100 | Gateway (reverse proxy)| `open`, `default`, `full`, `nvidia` |
+| 8110 | LLM proxy (OpenRouter) | `open`, `default`, `full`, `nvidia` |
+| 8113 | SAM2                   | `full`                 |
+| 8114 | SAM3                   | all except `minimal`   |
+| 8115 | ContactGraspNet        | `default`, `full`      |
+| 8116 | PyRoKi IK              | all profiles           |
+| 8117 | CuRobo                 | `default`, `full`      |
+| 8118 | OWL-ViT                | `full`                 |
+| 8119 | DemoGrasp              | `open`, `full`, `nvidia` |
+| 8120 | GraspAnalytic (rh56)   | `open`, `full`, `nvidia` |
+
+`CAPX_PROFILE=minimal` starts only PyRoKi (no gateway; the gateway falls back to `open` profile if `minimal` is set via env). Use `minimal` for pure IK workloads.
 
 Port assignments in `docker-compose.capx.yml` are straightforward to remap — adjust the `ports:` section to fit your setup. The launcher allocates servers to GPUs via greedy VRAM bin-packing at startup. On Tegra, `nvidia-smi` returns `[N/A]` for memory queries (unified memory architecture), so the launcher falls back to `torch.cuda.mem_get_info()` for accurate free-memory reporting. Set `CAPX_PROFILE` to switch server sets without any rebuild.
 

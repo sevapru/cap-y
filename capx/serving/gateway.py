@@ -14,6 +14,7 @@ Routes:
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,8 @@ import yaml
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Load routing config from gateway.yaml
 # ---------------------------------------------------------------------------
@@ -30,11 +33,18 @@ from fastapi.responses import JSONResponse
 _GATEWAY_YAML = Path(__file__).parent.parent.parent / "docker" / "gateway.yaml"
 
 
+_EFFECTIVE_PROFILE: str = "open"
+
+
 def _load_profile() -> dict[str, dict[str, Any]]:
     """Load backend routing for the active CAPX_PROFILE from gateway.yaml."""
-    profile_name = os.environ.get("CAPX_PROFILE", "open")
+    global _EFFECTIVE_PROFILE
+    requested = os.environ.get("CAPX_PROFILE", "open")
     if not _GATEWAY_YAML.exists():
-        # Fallback: minimal open profile hardcoded
+        logger.warning(
+            "gateway.yaml not found at %s; using hardcoded open profile", _GATEWAY_YAML
+        )
+        _EFFECTIVE_PROFILE = "open"
         return {
             "perception": {"sam3": {"port": 8114, "desc": "SAM3"}},
             "motion": {"pyroki": {"port": 8116, "desc": "PyRoKi IK"}},
@@ -42,9 +52,16 @@ def _load_profile() -> dict[str, dict[str, Any]]:
     with open(_GATEWAY_YAML) as f:
         cfg = yaml.safe_load(f)
     profiles = cfg.get("profiles", {})
-    if profile_name not in profiles:
-        profile_name = "open"
-    return profiles[profile_name]
+    if requested not in profiles:
+        logger.warning(
+            "CAPX_PROFILE=%r not found in gateway.yaml (available: %s); falling back to 'open'",
+            requested,
+            list(profiles.keys()),
+        )
+        _EFFECTIVE_PROFILE = "open"
+        return profiles.get("open", {})
+    _EFFECTIVE_PROFILE = requested
+    return profiles[requested]
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +92,7 @@ async def status() -> dict[str, Any]:
     Returns a dict mapping backend name to its health status.
     """
     profile = _load_profile()
-    results: dict[str, Any] = {"profile": os.environ.get("CAPX_PROFILE", "open"), "backends": {}}
+    results: dict[str, Any] = {"profile": _EFFECTIVE_PROFILE, "backends": {}}
 
     async with httpx.AsyncClient(timeout=2.0) as client:
         for group, members in profile.items():
