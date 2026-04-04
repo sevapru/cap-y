@@ -1,0 +1,263 @@
+cap-y
+Copyright (c) 2026 Seva Pru (sobaka.dev)
+
+This repository contains original code (Dockerfiles, build scripts, entrypoint,
+serving modules under capx/serving/) licensed under the MIT License. See LICENSE.
+
+The assembled container images bundle third-party components. Their licenses and
+copyrights are listed below, grouped by container tier.
+
+================================================================================
+ALL TIERS (cap-y:base, cap-y:default, cap-y:open, cap-y:nvidia)
+================================================================================
+
+NVIDIA CUDA Toolkit
+  License : NVIDIA Software License Agreement / NVIDIA CUDA EULA
+  URL     : https://docs.nvidia.com/cuda/eula/index.html
+  Note    : Redistribution of CUDA runtime libraries is permitted under the
+            EULA Appendix. Base image: nvcr.io/nvidia/cuda:13.0.0-cudnn-devel-ubuntu24.04
+
+PyTorch 2.11
+  License : BSD 3-Clause
+  URL     : https://github.com/pytorch/pytorch/blob/main/LICENSE
+  Copyright: 2016-present Facebook Inc.
+
+OpenCV 4.13
+  License : Apache 2.0
+  URL     : https://github.com/opencv/opencv/blob/master/LICENSE
+  Copyright: 2000-2024 Intel Corporation, 2009-2024 Willow Garage, Itseez
+
+Open3D
+  License : MIT
+  URL     : https://github.com/isl-org/Open3D/blob/main/LICENSE
+  Copyright: 2018-2024 Open3D contributors
+
+JAX / XLA / jaxlib
+  License : Apache 2.0
+  URL     : https://github.com/google/jax/blob/main/LICENSE
+  Copyright: 2018 Google LLC
+
+RealSense SDK (librealsense2)
+  License : Apache 2.0
+  URL     : https://github.com/IntelRealSense/librealsense/blob/master/LICENSE
+
+pyroki
+  License : MIT
+  URL     : https://github.com/chungmin99/pyroki
+
+================================================================================
+cap-y:default — ADDITIONAL BASE COMPONENTS
+================================================================================
+
+** USAGE RESTRICTION: cap-y:latest contains components that restrict
+** commercial use. See individual entries below.
+
+CaP-X (upstream framework)
+  License : MIT
+  URL     : https://github.com/capgym/cap-x/blob/main/LICENSE
+
+cuRobo  *** NON-COMMERCIAL ONLY ***
+  License : NVIDIA License (non-commercial research/evaluation only)
+            Only NVIDIA Corporation and its affiliates may use commercially.
+  URL     : https://github.com/NVlabs/curobo/blob/main/LICENSE
+  Copyright: 2023 NVIDIA CORPORATION & AFFILIATES
+  Note    : See capx/third_party/curobo/LICENSE for full terms.
+            For commercial use, contact NVIDIA.
+
+SAM3 (Segment Anything 3)  *** REDISTRIBUTION CONDITIONS APPLY ***
+  License : Meta SAM License (custom, last updated November 19, 2025)
+  URL     : https://github.com/facebookresearch/sam2/blob/main/LICENSE
+  Copyright: Meta Platforms, Inc.
+  Conditions:
+    - Redistribution must be under the same Meta SAM License terms
+    - Publications using SAM3 must acknowledge the use
+    - Must comply with applicable Trade Controls (ITAR, OFAC sanctions)
+    - No reverse engineering of model components
+    - Meta may unilaterally modify license terms
+  See: capx/third_party/sam3/LICENSE
+
+Contact GraspNet (PyTorch port)
+  License : No explicit license declared in vendored code (NOASSERTION).
+            Upstream: NVlabs/contact_graspnet — all rights reserved NVIDIA.
+            Treat as non-commercial research only pending clarification.
+  URL     : https://github.com/NVlabs/contact_graspnet
+  Copyright: NVIDIA Corporation
+
+PointNet / PointNet2 (used by Contact GraspNet)
+  License : MIT
+  URL     : https://github.com/yanx27/Pointnet_Pointnet2_pytorch/blob/master/LICENSE
+  Copyright: 2019 benny
+
+robosuite
+  License : MIT
+  URL     : https://github.com/ARISE-Initiative/robosuite/blob/master/LICENSE
+  Copyright: 2022 Stanford Vision and Learning Lab, UT Robot Perception and Learning Lab
+  Note    : MuJoCo portions under Apache 2.0 (Deepmind MuJoCo EULA)
+
+LIBERO-PRO (evaluation benchmark, optional venv)
+  License : MIT
+  URL     : https://github.com/Lifelong-Robot-Learning/LIBERO/blob/master/LICENSE
+  Copyright: 2023 Lifelong Robot Learning
+
+BEHAVIOR-1K (b1k submodule, data only)
+  License : MIT (OmniGibson, JoYLo), Apache 2.0 (BDDL3)
+  Note    : Pixar USD HumanFemale asset in asset_pipeline is under a
+            HIGHLY RESTRICTIVE Pixar EULA: personal non-commercial testing
+            of USD technology only, no redistribution, no production use.
+            This asset is NOT shipped in any container image.
+
+Robot URDF Assets (bundled with cuRobo)
+  See capx/third_party/curobo/LICENSE_ASSETS for per-asset licenses:
+  - Franka Emika Panda: Apache 2.0 (© 2017 Franka Emika GmbH)
+  - Kinova Kortex / Jaco: BSD 3-Clause (© 2018 Kinova Inc.)
+  - Universal Robots UR: BSD 3-Clause (© Universal Robots)
+  - KUKA IIWA + Allegro Hand: BSD 2-Clause (© 2016 TUM / SimLab)
+  - Techman: BSD 3-Clause (© 2019-2023 Techman Robot Inc.)
+  - Robotiq 2F-85 / 2F-140: BSD 2-Clause (© 2013 ROS-Industrial)
+  - Franka URDF (b1k joylo): Apache 2.0
+
+================================================================================
+cap-y:base — MIT/Apache GRASPING ALTERNATIVES
+================================================================================
+
+These components are the commercially-clean alternatives to cuRobo and
+ContactGraspNet. They are included in cap-y:base (and thus in cap-y:open and
+cap-y:nvidia via inheritance). License ceiling: Meta SAM License (SAM3).
+
+mink — differential inverse kinematics
+  License : Apache 2.0
+  URL     : https://github.com/tasts-robots/pink (mink variant)
+  Note    : MuJoCo-based, aarch64 native. Alternative IK backend alongside pyroki.
+
+rh56_controller — Inspire RH56DFX analytical grasp planner
+  License : MIT
+  URL     : https://github.com/correlllab/rh56_controller
+  Copyright: 2026 Correll Lab, University of Colorado Boulder
+             (Xuan Tan, William Xie, Nikolaus Correll)
+  Reference: arXiv 2603.08988 — "Characterization, Analytical Planning, and
+             Hybrid Force Control for the Inspire RH56DFX Hand"
+  Note    : Sim2real validated MuJoCo model for width-to-grasp planning,
+            hybrid speed-force control, 87% success on 300 grasps.
+
+DemoGrasp — universal dexterous grasping from a single demonstration
+  License : MIT
+  URL     : https://github.com/BeingBeyond/DemoGrasp
+  Reference: ICLR 2026 — "DemoGrasp: Universal Dexterous Grasping from a Single
+             Demonstration"
+  Note    : Inference-only by default. Supports Inspire hand natively with
+            pre-trained checkpoints (95% success on DexGraspNet, 84.6% across
+            diverse embodiments). Training requires IsaacGym Preview 4 (see below).
+
+================================================================================
+cap-y:default — ADDITIONAL COMPONENTS (NVIDIA NC — non-commercial only)
+================================================================================
+
+cap-y:default adds cuRobo and ContactGraspNet on top of cap-y:base.
+These components restrict commercial use of the assembled image.
+
+(See "cap-y (base)" section above for cuRobo and ContactGraspNet license details.)
+
+================================================================================
+cap-y:open — ADDITIONAL COMPONENTS
+================================================================================
+
+All additions in cap-y:open are commercially permissive.
+cap-y:open inherits cap-y:base (mink, rh56_controller, DemoGrasp — see above).
+
+ROS 2 Jazzy (rclpy, nav2, moveit2, ros2_control)
+  License : Apache 2.0
+  URL     : https://github.com/ros2
+  Copyright: Open Source Robotics Foundation
+
+CycloneDDS (RMW implementation)
+  License : Eclipse Public License 2.0 (EPL-2.0) /
+            Eclipse Distribution License 1.0 (EDL-1.0) — dual licensed
+  URL     : https://github.com/eclipse-cyclonedds/cyclonedds/blob/master/LICENSE
+  Note    : Use under EDL-1.0 for closed-source / commercial projects
+            (no copyleft obligation under EDL).
+
+nvblox C++ core (NOT the Isaac ROS wrapper)
+  License : Apache 2.0
+  URL     : https://github.com/valtsblukis/nvblox/blob/main/LICENSE
+  Note    : Only the standalone C++ core is included. The Isaac ROS nvblox
+            wrapper (NVIDIA Source Code License) is in cap-y:nvidia only.
+
+Drake (GCS trajectory planning, x86_64 only)
+  License : BSD 3-Clause
+  URL     : https://github.com/RobotLocomotion/drake/blob/master/LICENSE.TXT
+  Copyright: 2012-2024 Robot Locomotion Group
+
+LiveKit Python SDK + Agents + Silero
+  License : Apache 2.0
+  URL     : https://github.com/livekit/python-sdks/blob/main/LICENSE
+
+robot_descriptions (URDF fetching at runtime)
+  License : Apache 2.0
+  URL     : https://github.com/robot-descriptions/robot_descriptions.py
+
+DemoGrasp training dependencies (optional — WITH_DEMOGRASP_TRAINING=1 only)
+  IsaacGym Preview 4
+    License : NVIDIA IsaacGym License (NON-COMMERCIAL ONLY)
+    Note    : Only NVIDIA Corporation and its affiliates may use commercially.
+              cap-y-open built with WITH_DEMOGRASP_TRAINING=1 is NOT commercially
+              deployable. Default build (WITH_DEMOGRASP_TRAINING=0) is NOT affected.
+
+dfx_inspire_service — Unitree Inspire RH56DFX ROS2 hand controller
+  License : BSD 3-Clause
+  URL     : https://github.com/unitreerobotics/dfx_inspire_service
+  Copyright: Unitree Robotics
+  Note    : Topic-based control (rt/inspire/cmd, rt/inspire/state) for G1 + H1
+            with 12-motor dexterous hands. Built via colcon in the container.
+
+================================================================================
+cap-y:nvidia — ADDITIONAL COMPONENTS
+================================================================================
+
+** USAGE RESTRICTION: cap-y-nvidia requires either an NVIDIA Enterprise
+** Software License Agreement (production use) or an NVIDIA Research License
+** (academic/evaluation use) for all NVIDIA Source Code License components.
+
+Isaac ROS cuMotion
+  License : NVIDIA Source Code License Agreement
+  URL     : https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_cumotion
+  Copyright: NVIDIA Corporation
+
+Isaac ROS nvblox (wrapper)
+  License : NVIDIA Source Code License Agreement
+  URL     : https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_nvblox
+  Copyright: NVIDIA Corporation
+  Note    : Distinct from the Apache-licensed nvblox C++ core in cap-y-open.
+
+cuVSLAM (Visual SLAM)
+  License : NVIDIA Source Code License Agreement
+  Copyright: NVIDIA Corporation
+
+NITROS (NVIDIA Isaac Transport for ROS)
+  License : NVIDIA Source Code License Agreement
+  URL     : https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_nitros
+  Copyright: NVIDIA Corporation
+
+cuTAMP (Task and Motion Planning)  *** NON-COMMERCIAL ONLY ***
+  License : NVIDIA Research License (non-commercial only)
+  Copyright: NVIDIA Corporation
+
+ScheduleStream (bimanual scheduling)  *** NON-COMMERCIAL ONLY ***
+  License : NVIDIA License (non-commercial research/evaluation only)
+  URL     : https://github.com/NVlabs/ScheduleStream
+  Copyright: NVIDIA Corporation
+
+================================================================================
+SUMMARY TABLE
+================================================================================
+
+  Container      | Can be used commercially?
+  ---------------+--------------------------------------------------------------
+  cap-y:base     | YES — Meta SAM License conditions (redistribution terms, publication acknowledgment)
+  cap-y:default  | NO — cuRobo (NC), Contact GraspNet (no license / NC assumed)
+  cap-y:open     | YES — Meta SAM License conditions (same as base)
+  cap-y:nvidia   | NO — additionally requires NVIDIA Source Code License Agreement
+
+For a commercially deployable configuration, contact NVIDIA regarding cuRobo
+and Contact GraspNet licenses, and ensure SAM3 redistribution obligations are met.
+
+================================================================================
