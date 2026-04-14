@@ -1,0 +1,88 @@
+# cap-y:dev — all extras, both sim venvs, no caches cleaned
+#
+# ── Dependency chain ─────────────────────────────────────────────────────────
+#   nvcr.io/nvidia/cuda:13.0.0-cudnn-devel-ubuntu24.04
+#   └── cap-y:base   (docker/Dockerfile.base — auto-selects arch at build time)
+#       └── cap-y:dev   ← YOU ARE HERE
+#
+# ── What this adds over cap-y:base ──────────────────────────────────────────
+#   - dev/curobo/contactgraspnet/ovdet extras (system Python)
+#   - /opt/venv-robosuite  (robosuite + ContactGraspNet — separate venv)
+#   - /opt/venv-libero     (LIBERO-PRO + ContactGraspNet — separate venv)
+#   - cmake + ninja for CUDA extension compilation (x86_64 only — aarch64 base has them)
+#
+# Not for production — build size is large, caches retained for iteration speed.
+
+ARG BASE_IMAGE=cap-y:base
+FROM ${BASE_IMAGE}
+
+# CUDA_ARCH_BIN is inherited from cap-y:base ENV.
+# PYTHON_VERSION is an ARG (not ENV) in base, so re-declared here.
+ARG PYTHON_VERSION="3.12"
+
+# All extras compiled in this image — re-link them all on source mounts.
+ENV CAPX_INSTALL_EXTRAS="dev,contactgraspnet,curobo,ovdet"
+
+# cmake + ninja: aarch64 base already has them; install only on x86_64.
+RUN if [ "$(uname -m)" = "x86_64" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends \
+        cmake ninja-build ccache \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
+
+# Step D1 — dev Python tools + CUDA extensions (system Python)
+WORKDIR /tmp/capx-dev-install
+COPY pyproject.toml .
+COPY capx/third_party/sam3 capx/third_party/sam3
+COPY capx/third_party/contact_graspnet_pytorch capx/third_party/contact_graspnet_pytorch
+COPY capx/third_party/curobo capx/third_party/curobo
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.ccache \
+    mkdir -p capx && touch capx/__init__.py && \
+    if [ "$(uname -m)" = "x86_64" ]; then \
+      patch-pyproject-x86.sh pyproject.toml; \
+    else \
+      patch-pyproject.sh pyproject.toml; \
+    fi && \
+    SETUPTOOLS_SCM_PRETEND_VERSION=0.7.0 \
+    uv pip install --system --no-build-isolation ".[dev,curobo,contactgraspnet,ovdet]"
+
+# Step D2 — robosuite venv at /opt/venv-robosuite
+# Uses --system-site-packages to inherit CUDA PyTorch, OpenCV, Open3D from base
+COPY capx/third_party/libero_dependencies capx/third_party/libero_dependencies
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.ccache \
+    uv venv /opt/venv-robosuite --python python${PYTHON_VERSION} --system-site-packages && \
+    SETUPTOOLS_SCM_PRETEND_VERSION=0.7.0 \
+    uv pip install --python /opt/venv-robosuite/bin/python \
+      --no-build-isolation ".[robosuite,contactgraspnet]" || \
+    echo "WARNING: robosuite venv had errors (check network or deps)"
+
+# Step D3 — libero venv at /opt/venv-libero
+# robosuite and LIBERO have conflicting dependency sets — requires a separate venv
+COPY capx/third_party/LIBERO-PRO capx/third_party/LIBERO-PRO
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.ccache \
+    uv venv /opt/venv-libero --python python${PYTHON_VERSION} --system-site-packages && \
+    if [ "$(uname -m)" = "x86_64" ]; then \
+      patch-pyproject-x86.sh pyproject.toml; \
+    else \
+      patch-pyproject.sh pyproject.toml; \
+    fi && \
+    SETUPTOOLS_SCM_PRETEND_VERSION=0.7.0 \
+    uv pip install --python /opt/venv-libero/bin/python \
+      --no-build-isolation ".[libero,contactgraspnet]" || \
+    echo "WARNING: libero venv had errors (check network or deps)"
+
+RUN rm -rf /tmp/capx-dev-install
+
+# Step D4 — convenience aliases
+RUN echo 'alias activate-robosuite="source /opt/venv-robosuite/bin/activate"' >> /root/.bashrc && \
+    echo 'alias activate-libero="source /opt/venv-libero/bin/activate"' >> /root/.bashrc
+
+WORKDIR /workspace
+
+# NOTE: No CLEAN_CACHES — caches intentionally kept for iteration speed.

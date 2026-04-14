@@ -2,16 +2,17 @@
 # cap-y-open | cap-y-nvidia at a time (they reuse overlapping host ports).
 #
 # ─── Architecture selection ──────────────────────────────────────────────────
-# Dockerfiles are organized per platform under docker/<arch>/:
-#   docker/aarch64/   — source-compiled (OpenCV CUDA, Open3D CUDA, JAX Bazel)
-#   docker/x86_64/    — pre-built GPU wheels (cudawarped OpenCV, jax[cuda13], PyPI Open3D)
+# Unified Dockerfiles live under docker/ and use Docker's built-in TARGETARCH
+# (set automatically to "amd64" or "arm64" based on the build host).
+# No PLATFORM_ARCH variable needed — just run docker compose build directly:
 #
-# PLATFORM_ARCH is set automatically by build.sh (reads `uname -m`).
-# To override manually:
-#   PLATFORM_ARCH=x86_64 docker compose -f docker/docker-compose.capx.yml build cap-y-base
-#   PLATFORM_ARCH=aarch64 docker compose -f docker/docker-compose.capx.yml build cap-y-base
+#   docker compose -f docker/docker-compose.capx.yml build cap-y-base
 #
-# Default falls back to aarch64 if PLATFORM_ARCH is not set.
+# To cross-build for a different arch:
+#   docker compose -f docker/docker-compose.capx.yml build --platform linux/arm64 cap-y-base
+#
+# The per-arch subdirectories (docker/aarch64/, docker/x86_64/) are kept as
+# reference but are no longer used by compose.
 #
 # ─── Compose profiles ────────────────────────────────────────────────────────
 #   base     → cap-y-base
@@ -31,7 +32,7 @@ services:
   cap-y-base:
     build:
       context: ..
-      dockerfile: docker/${PLATFORM_ARCH:-aarch64}/Dockerfile.base
+      dockerfile: docker/Dockerfile.base
       args:
         CUDA_ARCH_BIN: "${CUDA_ARCH_BIN:-11.0}"
         WITH_DEMOGRASP: "${WITH_DEMOGRASP:-1}"
@@ -78,7 +79,7 @@ services:
   cap-y-default:
     build:
       context: ..
-      dockerfile: docker/${PLATFORM_ARCH:-aarch64}/Dockerfile
+      dockerfile: docker/Dockerfile
       args:
         BASE_IMAGE: cap-y:base
         CUDA_ARCH_BIN: "${CUDA_ARCH_BIN:-11.0}"
@@ -124,7 +125,7 @@ services:
   cap-y-open:
     build:
       context: ..
-      dockerfile: docker/${PLATFORM_ARCH:-aarch64}/Dockerfile.open
+      dockerfile: docker/Dockerfile.open
       args:
         BASE_IMAGE: cap-y:base
         CUDA_ARCH_BIN: "${CUDA_ARCH_BIN:-11.0}"
@@ -166,7 +167,7 @@ services:
   cap-y-nvidia:
     build:
       context: ..
-      dockerfile: docker/${PLATFORM_ARCH:-aarch64}/Dockerfile.nvidia
+      dockerfile: docker/Dockerfile.nvidia
       args:
         BASE_IMAGE: cap-y:open
     image: cap-y:nvidia
@@ -204,7 +205,7 @@ services:
   cap-y-dev:
     build:
       context: ..
-      dockerfile: docker/${PLATFORM_ARCH:-aarch64}/Dockerfile.dev
+      dockerfile: docker/Dockerfile.dev
       args:
         BASE_IMAGE: cap-y:base
     image: cap-y:dev

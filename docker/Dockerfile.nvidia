@@ -1,0 +1,84 @@
+# cap-y:nvidia — NVIDIA-licensed container (research / enterprise agreement)
+#
+# ── Dependency chain ─────────────────────────────────────────────────────────
+#   nvcr.io/nvidia/cuda:13.0.0-cudnn-devel-ubuntu24.04
+#   └── cap-y:base   (docker/Dockerfile.base)
+#       └── cap-y:open  (docker/Dockerfile.open)
+#           └── cap-y:nvidia  ← YOU ARE HERE
+#
+# ── What this adds over cap-y:open ──────────────────────────────────────────
+#   x86_64: apt debs from isaac.download.nvidia.com (~2 min, pre-built by NVIDIA)
+#   aarch64: colcon build from GitHub source (~20 min)
+#
+#   - ros-jazzy-isaac-ros-nitros           NVIDIA Source Code License
+#   - ros-jazzy-isaac-ros-cumotion         NVIDIA Source Code License
+#   - ros-jazzy-isaac-ros-visual-slam      NVIDIA Source Code License (cuVSLAM)
+#   - ros-jazzy-nvblox (Isaac ROS wrapper) NVIDIA Source Code License
+#   - nvidia-cutamp                        NVIDIA Research License NC (pip)
+#   - ScheduleStream                       NVIDIA NC License (pip)
+#
+# ── License ──────────────────────────────────────────────────────────────────
+#   Requires: NVIDIA Enterprise Agreement (production) OR
+#             NVIDIA Research License (academic/research use)
+
+ARG BASE_IMAGE=cap-y:open
+FROM ${BASE_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Isaac ROS — x86_64 uses apt debs, aarch64 uses colcon source build
+RUN if [ "$(uname -m)" = "x86_64" ]; then \
+      curl -fsSL https://isaac.download.nvidia.com/isaac-ros/repos.key \
+        | gpg --dearmor -o /usr/share/keyrings/nvidia-isaac-ros.gpg && \
+      echo "deb [arch=amd64 signed-by=/usr/share/keyrings/nvidia-isaac-ros.gpg] \
+        https://isaac.download.nvidia.com/isaac-ros/release-4.3 noble main" \
+        > /etc/apt/sources.list.d/nvidia-isaac-ros.list && \
+      apt-get update && apt-get install -y --no-install-recommends \
+        ros-${ROS_DISTRO}-isaac-ros-common \
+        ros-${ROS_DISTRO}-isaac-ros-nitros \
+        ros-${ROS_DISTRO}-isaac-ros-cumotion \
+        ros-${ROS_DISTRO}-isaac-ros-visual-slam \
+        ros-${ROS_DISTRO}-nvblox \
+      && rm -rf /var/lib/apt/lists/* \
+      || echo "WARNING: Some Isaac ROS packages may require NVIDIA entitlement"; \
+    else \
+      curl -fsSL https://isaac.download.nvidia.com/isaac-ros/repos.key \
+        | gpg --dearmor -o /usr/share/keyrings/nvidia-isaac-ros.gpg && \
+      echo "deb [signed-by=/usr/share/keyrings/nvidia-isaac-ros.gpg] \
+        https://isaac.download.nvidia.com/isaac-ros/release-4.3 noble main" \
+        > /etc/apt/sources.list.d/nvidia-isaac-ros.list && \
+      apt-get update && apt-get install -y --no-install-recommends \
+        ros-${ROS_DISTRO}-isaac-ros-common \
+        ros-${ROS_DISTRO}-isaac-ros-nitros \
+      && rm -rf /var/lib/apt/lists/* \
+      || echo "INFO: Isaac ROS packages not yet available for ${ROS_DISTRO}, install manually"; \
+    fi
+
+# aarch64: build cuMotion, nvblox wrapper, cuVSLAM from source via colcon
+RUN if [ "$(uname -m)" != "x86_64" ]; then \
+      mkdir -p /opt/isaac_ros_ws/src && \
+      cd /opt/isaac_ros_ws/src && \
+      git clone --depth 1 https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_cumotion.git 2>/dev/null || \
+        echo "INFO: isaac_ros_cumotion not publicly available, add via NVIDIA NGC" && \
+      git clone --depth 1 https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_nvblox.git 2>/dev/null || \
+        echo "INFO: isaac_ros_nvblox not publicly available" && \
+      git clone --depth 1 https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_visual_slam.git 2>/dev/null || \
+        echo "INFO: cuVSLAM not publicly available" && \
+      cd /opt/isaac_ros_ws && \
+      . /opt/ros/${ROS_DISTRO}/setup.sh && \
+      colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release 2>/dev/null || \
+        echo "INFO: Isaac ROS build skipped (source not available or deps missing)"; \
+    fi
+
+# cuTAMP (NVIDIA Research License NC) — pip wheel
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system nvidia-cutamp 2>/dev/null || \
+      echo "INFO: cuTAMP not available via pip, obtain from NVIDIA NGC"
+
+# ScheduleStream (NVIDIA NC License) — pip editable install
+RUN --mount=type=cache,target=/root/.cache/uv \
+    git clone --depth 1 https://github.com/NVlabs/ScheduleStream.git /opt/schedulestream && \
+    uv pip install --system -e /opt/schedulestream 2>/dev/null || \
+      echo "INFO: ScheduleStream install failed (may need cuRobo runtime)"
+
+RUN echo '. /opt/isaac_ros_ws/install/setup.bash 2>/dev/null || true' >> /root/.bashrc

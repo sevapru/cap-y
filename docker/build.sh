@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Build cap-y Docker images with automatic platform and GPU architecture detection.
 #
-# Platform (PLATFORM_ARCH) maps directly to the Dockerfile folder:
-#   aarch64  → docker/aarch64/  (Jetson Thor — source-compiled CUDA libs)
-#   x86_64   → docker/x86_64/  (workstations/servers — pre-built GPU wheels)
+# Architecture is detected automatically by Docker via TARGETARCH (amd64/arm64).
+# A single set of Dockerfiles under docker/ handles both arches using multi-stage
+# builds and inline uname -m checks. No PLATFORM_ARCH variable needed.
 #
 # CUDA_ARCH_BIN is the GPU compute capability for source-compiled components:
 #   11.0  Jetson Thor / GB10 (default on aarch64)
@@ -14,23 +14,28 @@
 set -euo pipefail
 
 COMPOSE_FILE="${COMPOSE_FILE:-docker/docker-compose.capx.yml}"
-PLATFORM_ARCH=""
 CUDA_ARCH_BIN=""
 BUILD_ALL=0
 BUILD_DEV=0
+PUSH=0
+REGISTRY="${REGISTRY:-sevapru/cap-y}"
 
 usage() {
   cat <<EOF
 Usage: $0 [OPTIONS]
 
 Options:
-  --platform ARCH   Force platform (aarch64 or x86_64). Default: auto (uname -m)
   --cuda-arch CAP   GPU compute capability (e.g. 8.9, 9.0, 11.0, 12.0)
-                    Default: auto-detect via nvidia-smi, else platform default
+                    Default: auto-detect via nvidia-smi
   --file FILE       Compose file (default: docker/docker-compose.capx.yml)
   --all             Build all images: base → default, base → open → nvidia
   --dev             Build cap-y:dev after base (all extras + sim venvs)
+  --push            Tag with arch suffix and push to \$REGISTRY (default: sevapru/cap-y)
+  --registry REPO   Override registry repo (default: sevapru/cap-y)
   -h, --help        Show this help
+
+Architecture is detected automatically by Docker (TARGETARCH = amd64 or arm64).
+No --platform flag needed. To cross-build: docker buildx build --platform linux/arm64
 
 Image hierarchy:
   cap-y:base    MIT/Apache clean foundation (mink, DemoGrasp, rh56, OpenCV CUDA, JAX)
@@ -39,96 +44,100 @@ Image hierarchy:
   cap-y:nvidia  + Isaac ROS + cuMotion + cuVSLAM (from cap-y:open)
 
 Examples:
-  # Auto-detect everything (recommended)
-  ./docker/build.sh
-
-  # Build full stack on RTX 4090
-  ./docker/build.sh --all --cuda-arch 8.9
-
-  # Force aarch64 build on x86_64 host (cross-build)
-  ./docker/build.sh --platform aarch64 --cuda-arch 11.0
+  ./docker/build.sh                        # auto-detect GPU, native arch
+  ./docker/build.sh --all --cuda-arch 8.9  # full stack, RTX 4090
+  ./docker/build.sh --cuda-arch 11.0       # Jetson Thor (when cross-building)
 EOF
   exit 1
 }
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --platform)     PLATFORM_ARCH="$2"; shift 2 ;;
     --cuda-arch)    CUDA_ARCH_BIN="$2"; shift 2 ;;
-    # legacy flag alias
-    --arch)         CUDA_ARCH_BIN="$2"; shift 2 ;;
+    --arch)         CUDA_ARCH_BIN="$2"; shift 2 ;;  # legacy alias
+    --platform)     echo "NOTE: --platform is no longer needed; Docker detects arch automatically."; shift 2 ;;
     --file|-f)      COMPOSE_FILE="$2"; shift 2 ;;
     --all)          BUILD_ALL=1; shift ;;
     --dev)          BUILD_DEV=1; shift ;;
+    --push)         PUSH=1; shift ;;
+    --registry)     REGISTRY="$2"; shift 2 ;;
     -h|--help)      usage ;;
     *) echo "Unknown option: $1"; usage ;;
   esac
 done
 
-# ── Platform detection ────────────────────────────────────────────────────────
-if [[ -z "$PLATFORM_ARCH" ]]; then
-  PLATFORM_ARCH=$(uname -m)
-fi
-
-if [[ "$PLATFORM_ARCH" != "aarch64" && "$PLATFORM_ARCH" != "x86_64" ]]; then
-  echo "ERROR: Unsupported platform '${PLATFORM_ARCH}'. Expected aarch64 or x86_64."
-  exit 1
-fi
-
-echo "Platform: ${PLATFORM_ARCH}  →  using docker/${PLATFORM_ARCH}/ Dockerfiles"
-
 # ── CUDA architecture detection ───────────────────────────────────────────────
+# Platform (x86_64 / aarch64) is handled inside the Dockerfile via TARGETARCH.
+# Only CUDA_ARCH_BIN needs to be detected here for cmake-based source builds.
 if [[ -z "$CUDA_ARCH_BIN" ]]; then
   if command -v nvidia-smi &>/dev/null; then
     CUDA_ARCH_BIN=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null \
       | head -1 | tr -d '[:space:]') || true
   fi
   if [[ -z "$CUDA_ARCH_BIN" ]]; then
-    # Platform-specific defaults
-    if [[ "$PLATFORM_ARCH" == "aarch64" ]]; then
-      CUDA_ARCH_BIN="11.0"   # Jetson Thor (SM 110)
+    # Guess from arch: Jetson Thor default for aarch64, RTX 40-series for x86_64
+    if [[ "$(uname -m)" == "aarch64" ]]; then
+      CUDA_ARCH_BIN="11.0"
     else
-      CUDA_ARCH_BIN="8.9"    # RTX 40-series (SM 89)
+      CUDA_ARCH_BIN="8.9"
     fi
-    echo "CUDA compute capability: not detected — using default ${CUDA_ARCH_BIN} for ${PLATFORM_ARCH}"
+    echo "CUDA compute capability: not detected — using default ${CUDA_ARCH_BIN}"
   else
     echo "CUDA compute capability: auto-detected ${CUDA_ARCH_BIN}"
   fi
 fi
 
+# ── Write docker/.env (Compose reads this automatically, no manual export needed)
+ENV_FILE="$(dirname "${COMPOSE_FILE}")/.env"
+cat > "${ENV_FILE}" <<EOF
+# Auto-generated by docker/build.sh — do not commit (already in .gitignore)
+CUDA_ARCH_BIN=${CUDA_ARCH_BIN}
+EOF
+
 # ── Build ─────────────────────────────────────────────────────────────────────
-export PLATFORM_ARCH
 export CUDA_ARCH_BIN
 
 echo ""
-echo "Building cap-y:base  [platform=${PLATFORM_ARCH}, cuda_arch=${CUDA_ARCH_BIN}]"
-docker compose -f "${COMPOSE_FILE}" build \
-  --build-arg CUDA_ARCH_BIN="${CUDA_ARCH_BIN}" \
-  cap-y-base
+BAKE_FILE="$(dirname "${COMPOSE_FILE}")/docker-bake.hcl"
 
-if [[ "$BUILD_ALL" = "1" ]]; then
-  echo ""
-  echo "Building cap-y:default (+ cuRobo + ContactGraspNet — NVIDIA NC)"
-  docker compose -f "${COMPOSE_FILE}" build cap-y-default
-
-  echo ""
-  echo "Building cap-y:open (+ ROS2 full stack + nvblox + Drake)"
-  docker compose -f "${COMPOSE_FILE}" build \
-    --build-arg CUDA_ARCH_BIN="${CUDA_ARCH_BIN}" \
-    cap-y-open
-
-  echo ""
-  echo "Building cap-y:nvidia (+ Isaac ROS + cuMotion + cuVSLAM)"
-  docker compose -f "${COMPOSE_FILE}" build cap-y-nvidia
-
-  echo ""
-  echo "All images built:"
-  docker image ls --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}' \
-    --filter reference='cap-y:*'
+# Select bake group / targets
+if [[ "$BUILD_ALL" = "1" && "$BUILD_DEV" = "1" ]]; then
+  BAKE_TARGET="full"    # base + default + open + nvidia + dev
+elif [[ "$BUILD_ALL" = "1" ]]; then
+  BAKE_TARGET="all"     # base + default + open + nvidia
+else
+  BAKE_TARGET="cap-y-base"
 fi
 
-if [[ "$BUILD_DEV" = "1" ]]; then
-  echo ""
-  echo "Building cap-y:dev (all extras + sim venvs — dev only)"
-  docker compose -f "${COMPOSE_FILE}" build cap-y-dev
+if [[ "$BUILD_DEV" = "1" && "$BUILD_ALL" != "1" ]]; then
+  # dev depends on base; bake resolves it via contexts
+  BAKE_TARGET="cap-y-base cap-y-dev"
+fi
+
+echo "Building: ${BAKE_TARGET}  [arch=auto (TARGETARCH), cuda_arch=${CUDA_ARCH_BIN:-auto}]"
+echo "Bake resolves the dependency graph — no manual ordering needed."
+echo ""
+
+BAKE_ARGS=()
+if [[ "$PUSH" = "1" ]]; then
+  BAKE_ARGS+=(--push)
+  echo "Registry: ${REGISTRY}  (tags: *-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/'))"
+fi
+
+BAKE_REGISTRY=""
+if [[ "$PUSH" = "1" ]]; then
+  BAKE_REGISTRY="${REGISTRY}"
+fi
+
+CUDA_ARCH_BIN="${CUDA_ARCH_BIN}" WITH_DEMOGRASP="${WITH_DEMOGRASP:-1}" \
+  REGISTRY="${BAKE_REGISTRY}" \
+  docker buildx bake -f "${BAKE_FILE}" "${BAKE_ARGS[@]}" ${BAKE_TARGET}
+
+echo ""
+echo "Built images:"
+docker image ls --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}' \
+  --filter reference='cap-y:*'
+if [[ "$PUSH" = "1" ]]; then
+  docker image ls --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}' \
+    --filter "reference=${REGISTRY}:*"
 fi
