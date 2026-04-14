@@ -3,7 +3,8 @@ import base64
 import functools
 import io
 import logging
-from typing import Any, List, Tuple
+import os
+from typing import Any
 
 import numpy as np
 import torch
@@ -21,18 +22,27 @@ from sam3.model_builder import build_sam3_image_model
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+app = FastAPI(title="SAM3 Server", version="1.0.0")
 
-
-@app.get("/health")
-async def health():
-    return {"status": "ready" if _MODEL is not None else "initializing"}
-
+# SAM 3 / SAM 3.1 HuggingFace repo identifiers
+_HF_REPOS: dict[str, tuple[str, str]] = {
+    "facebook/sam3":   ("sam3.pt",   "config.json"),
+    "facebook/sam3.1": ("sam3_1.pt", "config.json"),
+}
 
 # Global state
 _PROCESSOR: Any | None = None
 _MODEL: Any | None = None
 _DEVICE: str = "cuda"
+_HF_REPO: str = "facebook/sam3"
+
+
+@app.get("/health")
+async def health():
+    return {
+        "status": "ready" if _MODEL is not None else "initializing",
+        "model": _HF_REPO,
+    }
 
 # Semaphore to serialize GPU access (prevents OOM from concurrent inference)
 _GPU_SEMAPHORE = asyncio.Semaphore(1)
@@ -239,14 +249,65 @@ async def segment_point(req: PointPromptRequest):
         raise HTTPException(status_code=500, detail=f"Point prompt inference failed: {e}")
 
 
+def _download_checkpoint(hf_repo: str, hf_token: str | None) -> str:
+    """Download the SAM checkpoint from HuggingFace and return the local path.
+
+    SAM 3.1 (``facebook/sam3.1``) is a gated model — you must accept the
+    contact-information agreement on https://huggingface.co/facebook/sam3.1
+    and then supply a token via ``--hf-token`` or the ``HF_TOKEN`` env var.
+    """
+    from huggingface_hub import hf_hub_download  # noqa: PLC0415
+
+    token = hf_token or os.environ.get("HF_TOKEN")
+    if hf_repo not in _HF_REPOS:
+        raise ValueError(
+            f"Unknown HF repo '{hf_repo}'. "
+            f"Supported: {list(_HF_REPOS)}"
+        )
+    ckpt_name, cfg_name = _HF_REPOS[hf_repo]
+
+    if hf_repo == "facebook/sam3.1" and token is None:
+        logger.warning(
+            "SAM 3.1 is a gated model. You must agree to the contact-info terms at "
+            "https://huggingface.co/facebook/sam3.1 and supply a token via "
+            "--hf-token or the HF_TOKEN environment variable. "
+            "Attempting download without token — this will fail if you haven't agreed."
+        )
+
+    logger.info("Downloading %s from %s ...", ckpt_name, hf_repo)
+    # Download config first (small, validates access early)
+    hf_hub_download(repo_id=hf_repo, filename=cfg_name, token=token)
+    checkpoint_path = hf_hub_download(repo_id=hf_repo, filename=ckpt_name, token=token)
+    logger.info("Checkpoint cached at %s", checkpoint_path)
+    return checkpoint_path
+
+
 def main(
     device: str = "cuda",
     port: int = 8114,
     host: str = "127.0.0.1",
+    hf_repo: str = "facebook/sam3",
+    hf_token: str | None = None,
+    checkpoint_path: str | None = None,
 ):
-    global _MODEL, _PROCESSOR, _DEVICE
+    """Launch the SAM3 / SAM 3.1 segmentation server.
+
+    Args:
+        device: CUDA device string, e.g. "cuda" or "cuda:1".
+        port: HTTP port to bind.
+        host: Host address to bind.
+        hf_repo: HuggingFace repo to download the checkpoint from.
+            Use "facebook/sam3" (default) for SAM 3 or "facebook/sam3.1"
+            for SAM 3.1 (gated — requires --hf-token or HF_TOKEN env var).
+        hf_token: HuggingFace access token for gated models (SAM 3.1).
+            Can also be set via the HF_TOKEN environment variable.
+        checkpoint_path: Path to an already-downloaded checkpoint file.
+            Overrides --hf-repo / --hf-token if provided.
+    """
+    global _MODEL, _PROCESSOR, _DEVICE, _HF_REPO
 
     _DEVICE = device
+    _HF_REPO = hf_repo
 
     # Setup torch settings for Ampere+ GPUs as recommended
     if torch.cuda.is_available():
@@ -260,19 +321,24 @@ def main(
             device_idx = int(device.split(":")[-1]) if ":" in device else 0
             torch.cuda.set_device(device_idx)
 
-    logger.info("Loading SAM3 model...")
+    # Resolve checkpoint: explicit path > HF download
+    if checkpoint_path is None:
+        checkpoint_path = _download_checkpoint(hf_repo, hf_token)
+
+    logger.info("Loading SAM model from %s (repo: %s) ...", checkpoint_path, hf_repo)
     try:
-        # Assuming build_sam3_image_model loads default checkpoint
-        _MODEL = build_sam3_image_model(enable_inst_interactivity=True)
+        _MODEL = build_sam3_image_model(
+            checkpoint_path=checkpoint_path,
+            load_from_HF=False,
+            enable_inst_interactivity=True,
+            device=device,
+        )
     except Exception as e:
-        logger.error(f"Error building SAM3 model: {e}")
+        logger.error("Error building SAM model: %s", e)
         raise
 
-    if hasattr(_MODEL, "to") and device:
-        _MODEL = _MODEL.to(device)
-
     _PROCESSOR = Sam3Processor(_MODEL, device=device, confidence_threshold=0.0)
-    logger.info(f"SAM3 model loaded on {device}. Starting Server...")
+    logger.info("SAM model (%s) loaded on %s. Starting server ...", hf_repo, device)
 
     uvicorn.run(app, host=host, port=port)
 

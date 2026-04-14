@@ -52,6 +52,10 @@ SERVER_REGISTRY: dict[str, dict[str, Any]] = {
         "default_port": 8114,
         "gpu_required": True,
         "gpu_memory_mb": 3000,
+        # Set hf_repo to "facebook/sam3.1" and supply hf_token to use SAM 3.1.
+        # SAM 3.1 is a gated model — accept the contact-info agreement at
+        # https://huggingface.co/facebook/sam3.1 first, then pass --hf-token
+        # or set the HF_TOKEN environment variable.
         "extra_args": {"device": "cuda"},
     },
     "graspnet": {
@@ -118,6 +122,16 @@ SERVER_REGISTRY: dict[str, dict[str, Any]] = {
         "gpu_memory_mb": 0,
         "extra_args": {},
     },
+    # Newton GPU physics server (Apache 2.0).
+    # Runs Newton/Warp simulation on a GPU host; cap-y envs connect via HTTP.
+    # Requires newton[torch-cu13] on the server host (installed in cap-y:base).
+    "newton": {
+        "target": "capx.serving.launch_newton_server",
+        "default_port": 8124,
+        "gpu_required": True,
+        "gpu_memory_mb": 2000,
+        "extra_args": {},
+    },
 }
 
 # Reverse lookup: _target_ module string -> short name
@@ -173,6 +187,11 @@ PROFILES: dict[str, list[dict[str, Any]]] = {
     ],
     "minimal": [
         {"server": "pyroki", "port": 8116},
+    ],
+    # Newton-only profile: runs the Newton GPU physics server.
+    # Useful when cap-y environments use NewtonRemoteEnv as their simulator.
+    "newton": [
+        {"server": "newton", "port": 8124},
     ],
 }
 
