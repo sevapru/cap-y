@@ -264,6 +264,9 @@ def main():
     base_mod.test_pyroki()
     base_mod.test_wheel_integrity()
     base_mod.test_libero_venv()
+    base_mod.test_pymodbus()
+    base_mod.test_unitree_sdk2()
+    base_mod.test_newton_import()
 
     global PASS, FAIL, INFO
     PASS += base_mod.PASS

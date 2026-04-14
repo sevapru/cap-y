@@ -310,6 +310,48 @@ def test_demograsp():
 
 
 # ---------------------------------------------------------------------------
+# pymodbus (MIT) — Modbus TCP for Inspire RH56DFTP hands
+# ---------------------------------------------------------------------------
+
+def test_pymodbus():
+    try:
+        import pymodbus
+        report("PASS", f"pymodbus {pymodbus.__version__}", "Modbus TCP ready (Inspire RH56DFTP)")
+    except ImportError:
+        report("FAIL", "pymodbus", "Not installed — pip install pymodbus")
+
+
+# ---------------------------------------------------------------------------
+# unitree_sdk2_python (BSD-3) — Python DDS SDK for Unitree robots
+# ---------------------------------------------------------------------------
+
+def test_unitree_sdk2():
+    try:
+        import unitree_sdk2py
+        report("PASS", "unitree_sdk2_python", "DDS SDK importable (G1/H1)")
+    except ImportError:
+        report("FAIL", "unitree_sdk2_python", "Not installed")
+
+
+# ---------------------------------------------------------------------------
+# Newton (Apache 2.0) — GPU physics engine
+# ---------------------------------------------------------------------------
+
+def test_newton_import():
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", "import newton; print(getattr(newton, '__version__', 'unknown'))"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0:
+            report("PASS", f"Newton {result.stdout.strip()}", "GPU physics importable")
+        else:
+            report("FAIL", "Newton", result.stderr.strip()[:200])
+    except Exception as e:
+        report("FAIL", "Newton", str(e))
+
+
+# ---------------------------------------------------------------------------
 # Wheel integrity (/opt/wheels/)
 # ---------------------------------------------------------------------------
 
@@ -390,6 +432,9 @@ def main():
     test_mink()
     test_rh56_controller()
     test_demograsp()
+    test_pymodbus()
+    test_unitree_sdk2()
+    test_newton_import()
     test_wheel_integrity()
     test_libero_venv()
 
