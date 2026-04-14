@@ -7,7 +7,7 @@ and bimanual readiness. Run inside cap-y-open with GPU access.
 Usage:
     python scripts/test_container_open.py
     # or via docker compose:
-    docker compose -f docker/docker-compose.capx.yml --profile test-open run capx-test-open
+    docker compose -f docker/docker-compose.capx.yml --profile test-open run --rm capx-test-open
 """
 
 import glob

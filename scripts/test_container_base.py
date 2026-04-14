@@ -6,8 +6,14 @@ Run inside the cap-y container with GPU access (runtime: nvidia).
 
 Usage:
     python scripts/test_container_base.py
-    # or via docker compose:
-    docker compose -f docker/docker-compose.capx.yml --profile test run capx-test
+    # or via docker compose (from repo docker/):
+    docker compose -f docker-compose.capx.yml --profile test run --rm capx-test
+
+cuRobo + ContactGraspNet are optional on cap-y:base (commercial-clean image). On cap-y:default
+they must be present. capx-test-default sets CAPY_REQUIRE_LICENSED_STACK=1 so missing packages fail.
+
+Set CAPX_PROFILE / server tool sets in the running container via compose env on cap-y-* services;
+this script only checks Python/CUDA stack parity with the image.
 """
 
 import glob
@@ -21,6 +27,15 @@ from pathlib import Path
 PASS = 0
 FAIL = 0
 INFO = 0
+
+
+def _require_licensed_stack() -> bool:
+    """When true, cuRobo + ContactGraspNet must be importable (cap-y:default / NC stack)."""
+    return os.environ.get("CAPY_REQUIRE_LICENSED_STACK", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
 
 def report(status: str, module: str, detail: str):
@@ -171,7 +186,14 @@ def test_curobo():
     try:
         spec = importlib.util.find_spec("curobo")
         if spec is None:
-            report("FAIL", "CuRobo", "Package not installed")
+            if _require_licensed_stack():
+                report("FAIL", "CuRobo", "Package not installed (required on cap-y:default)")
+            else:
+                report(
+                    "INFO",
+                    "CuRobo",
+                    "Not installed (expected on cap-y:base; use cap-y:default for NC stack)",
+                )
             return
 
         path = ""
@@ -201,8 +223,14 @@ def test_contact_graspnet():
         spec = importlib.util.find_spec("contact_graspnet_pytorch")
         if spec and spec.origin and os.path.exists(spec.origin):
             report("PASS", "ContactGraspNet", f"Found at {spec.origin}")
+        elif _require_licensed_stack():
+            report("FAIL", "ContactGraspNet", "Not installed (required on cap-y:default)")
         else:
-            report("FAIL", "ContactGraspNet", "Not installed")
+            report(
+                "INFO",
+                "ContactGraspNet",
+                "Not installed (expected on cap-y:base; use cap-y:default for NC stack)",
+            )
     except Exception as e:
         report("FAIL", "ContactGraspNet", str(e))
 

@@ -7,10 +7,11 @@ ScheduleStream as a known gap. Run inside cap-y-nvidia with GPU access.
 Usage:
     python scripts/test_container_nvidia.py
     # or via docker compose:
-    docker compose -f docker/docker-compose.capx.yml --profile test-nvidia run capx-test-nvidia
+    docker compose -f docker/docker-compose.capx.yml --profile test-nvidia run --rm capx-test-nvidia
 """
 
 import os
+import platform
 import subprocess
 import sys
 
@@ -64,74 +65,113 @@ def test_isaac_ros_apt():
 
 
 # ---------------------------------------------------------------------------
-# Isaac ROS common + NITROS packages
+# Isaac ROS common + NITROS + cuMotion + cuVSLAM + nvblox packages
+#
+# x86_64: packages installed as apt debs from NVIDIA Isaac ROS release repo
+#          → check via `ros2 pkg list`
+# aarch64: packages built from source via colcon
+#          → check for source + install directories in /opt/isaac_ros_ws
 # ---------------------------------------------------------------------------
+
+def _ros2_pkg_list() -> tuple[bool, str]:
+    r = _run(["ros2", "pkg", "list"])
+    return r.returncode == 0, r.stdout
+
 
 def test_isaac_ros_packages():
-    r = _run(["ros2", "pkg", "list"])
-    if r.returncode != 0:
-        report("INFO", "Isaac ROS packages", "ros2 pkg list failed (packages may not be available for Jazzy)")
+    ok, pkgs = _ros2_pkg_list()
+    if not ok:
+        report("INFO", "Isaac ROS packages", "ros2 pkg list failed")
         return
 
-    pkgs = r.stdout
-    targets = ["isaac_ros_common", "isaac_ros_nitros"]
-    found = [t for t in targets if t in pkgs]
-    missing = [t for t in targets if t not in pkgs]
-
-    if found and not missing:
-        report("PASS", "Isaac ROS packages", f"Installed: {', '.join(found)}")
-    elif found:
-        report("INFO", "Isaac ROS packages", f"Partial: {', '.join(found)}; missing: {', '.join(missing)}")
+    arch = platform.machine()
+    if arch == "x86_64":
+        # x86_64: all Isaac ROS components are apt-installed debs
+        targets = ["isaac_ros_common", "isaac_ros_nitros", "isaac_ros_cumotion",
+                   "isaac_ros_visual_slam", "nvblox"]
+        found = [t for t in targets if t in pkgs]
+        missing = [t for t in targets if t not in pkgs]
+        if not missing:
+            report("PASS", "Isaac ROS packages (apt debs)",
+                   f"All {len(found)} installed: {', '.join(found)}")
+        elif found:
+            report("INFO", "Isaac ROS packages (apt debs)",
+                   f"Partial: {', '.join(found)}; missing (may need NVIDIA entitlement): {', '.join(missing)}")
+        else:
+            report("INFO", "Isaac ROS packages (apt debs)",
+                   "None found — NVIDIA entitlement / repo access required")
     else:
-        report("INFO", "Isaac ROS packages", "Not available for Jazzy yet (graceful skip)")
+        # aarch64: check for ros2 pkg visibility at minimum
+        targets = ["isaac_ros_common", "isaac_ros_nitros"]
+        found = [t for t in targets if t in pkgs]
+        missing = [t for t in targets if t not in pkgs]
+        if found and not missing:
+            report("PASS", "Isaac ROS packages (colcon)", f"Installed: {', '.join(found)}")
+        elif found:
+            report("INFO", "Isaac ROS packages (colcon)",
+                   f"Partial: {', '.join(found)}; missing: {', '.join(missing)}")
+        else:
+            report("INFO", "Isaac ROS packages (colcon)", "Not visible in ros2 pkg list")
 
-
-# ---------------------------------------------------------------------------
-# cuMotion
-# ---------------------------------------------------------------------------
 
 def test_cumotion():
-    src = "/opt/isaac_ros_ws/src/isaac_ros_cumotion"
-    if os.path.isdir(src):
-        install = "/opt/isaac_ros_ws/install/isaac_ros_cumotion"
-        if os.path.isdir(install):
-            report("PASS", "cuMotion", "Source cloned + colcon build installed")
+    arch = platform.machine()
+    if arch == "x86_64":
+        ok, pkgs = _ros2_pkg_list()
+        if ok and "isaac_ros_cumotion" in pkgs:
+            report("PASS", "cuMotion", "apt deb installed (x86_64)")
         else:
-            report("INFO", "cuMotion", "Source cloned but colcon build skipped (deps missing)")
+            report("INFO", "cuMotion", "Not available (requires NVIDIA entitlement)")
     else:
-        report("INFO", "cuMotion", "Source not available (repo may require NGC access)")
+        src = "/opt/isaac_ros_ws/src/isaac_ros_cumotion"
+        if os.path.isdir(src):
+            install = "/opt/isaac_ros_ws/install/isaac_ros_cumotion"
+            if os.path.isdir(install):
+                report("PASS", "cuMotion", "Source cloned + colcon build installed (aarch64)")
+            else:
+                report("INFO", "cuMotion", "Source cloned but colcon build skipped (deps missing)")
+        else:
+            report("INFO", "cuMotion", "Source not available (repo may require NGC access)")
 
-
-# ---------------------------------------------------------------------------
-# cuVSLAM
-# ---------------------------------------------------------------------------
 
 def test_cuvslam():
-    src = "/opt/isaac_ros_ws/src/isaac_ros_visual_slam"
-    if os.path.isdir(src):
-        install = "/opt/isaac_ros_ws/install/isaac_ros_visual_slam"
-        if os.path.isdir(install):
-            report("PASS", "cuVSLAM", "Source cloned + colcon build installed")
+    arch = platform.machine()
+    if arch == "x86_64":
+        ok, pkgs = _ros2_pkg_list()
+        if ok and "isaac_ros_visual_slam" in pkgs:
+            report("PASS", "cuVSLAM", "apt deb installed (x86_64)")
         else:
-            report("INFO", "cuVSLAM", "Source cloned but colcon build skipped")
+            report("INFO", "cuVSLAM", "Not available (requires NVIDIA entitlement)")
     else:
-        report("INFO", "cuVSLAM", "Source not available")
+        src = "/opt/isaac_ros_ws/src/isaac_ros_visual_slam"
+        if os.path.isdir(src):
+            install = "/opt/isaac_ros_ws/install/isaac_ros_visual_slam"
+            if os.path.isdir(install):
+                report("PASS", "cuVSLAM", "Source cloned + colcon build installed (aarch64)")
+            else:
+                report("INFO", "cuVSLAM", "Source cloned but colcon build skipped")
+        else:
+            report("INFO", "cuVSLAM", "Source not available")
 
-
-# ---------------------------------------------------------------------------
-# nvblox Isaac ROS wrapper
-# ---------------------------------------------------------------------------
 
 def test_nvblox_wrapper():
-    src = "/opt/isaac_ros_ws/src/isaac_ros_nvblox"
-    if os.path.isdir(src):
-        install = "/opt/isaac_ros_ws/install/isaac_ros_nvblox"
-        if os.path.isdir(install):
-            report("PASS", "nvblox wrapper", "Source cloned + colcon build installed")
+    arch = platform.machine()
+    if arch == "x86_64":
+        ok, pkgs = _ros2_pkg_list()
+        if ok and "nvblox" in pkgs:
+            report("PASS", "nvblox wrapper", "apt deb installed (x86_64)")
         else:
-            report("INFO", "nvblox wrapper", "Source cloned but colcon build skipped")
+            report("INFO", "nvblox wrapper", "Not available (requires NVIDIA entitlement)")
     else:
-        report("INFO", "nvblox wrapper", "Source not available")
+        src = "/opt/isaac_ros_ws/src/isaac_ros_nvblox"
+        if os.path.isdir(src):
+            install = "/opt/isaac_ros_ws/install/isaac_ros_nvblox"
+            if os.path.isdir(install):
+                report("PASS", "nvblox wrapper", "Source cloned + colcon build installed (aarch64)")
+            else:
+                report("INFO", "nvblox wrapper", "Source cloned but colcon build skipped")
+        else:
+            report("INFO", "nvblox wrapper", "Source not available")
 
 
 # ---------------------------------------------------------------------------
