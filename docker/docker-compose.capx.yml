@@ -1,21 +1,43 @@
+# cap-x / cap-y runtime stacks — start exactly ONE of cap-y-base | cap-y-default |
+# cap-y-open | cap-y-nvidia at a time (they reuse overlapping host ports).
+#
+# ─── Architecture selection ──────────────────────────────────────────────────
+# Dockerfiles are organized per platform under docker/<arch>/:
+#   docker/aarch64/   — source-compiled (OpenCV CUDA, Open3D CUDA, JAX Bazel)
+#   docker/x86_64/    — pre-built GPU wheels (cudawarped OpenCV, jax[cuda13], PyPI Open3D)
+#
+# PLATFORM_ARCH is set automatically by build.sh (reads `uname -m`).
+# To override manually:
+#   PLATFORM_ARCH=x86_64 docker compose -f docker/docker-compose.capx.yml build cap-y-base
+#   PLATFORM_ARCH=aarch64 docker compose -f docker/docker-compose.capx.yml build cap-y-base
+#
+# Default falls back to aarch64 if PLATFORM_ARCH is not set.
+#
+# ─── Compose profiles ────────────────────────────────────────────────────────
+#   base     → cap-y-base
+#   shell    → capx-base (interactive bash)
+#   default  → cap-y-default
+#   open     → cap-y-open
+#   nvidia   → cap-y-nvidia
+#   dev      → cap-y-dev
+#   test*    → one-shot verification containers
+#
 services:
 
   # ---------------------------------------------------------------------------
   # cap-y:base — MIT/Apache/BSD clean foundation
   # License ceiling: Meta SAM License (SAM3). Commercially deployable.
-  # Default profile: open (DemoGrasp + rh56_controller + SAM3 + PyRoKi)
   # ---------------------------------------------------------------------------
   cap-y-base:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.base
+      dockerfile: docker/${PLATFORM_ARCH:-aarch64}/Dockerfile.base
       args:
         CUDA_ARCH_BIN: "${CUDA_ARCH_BIN:-11.0}"
-        OPENCV_VERSION: "${OPENCV_VERSION:-4.13.0}"
         WITH_DEMOGRASP: "${WITH_DEMOGRASP:-1}"
-        WITH_DEMOGRASP_TRAINING: "${WITH_DEMOGRASP_TRAINING:-0}"
     image: cap-y:base
     runtime: nvidia
+    profiles: ["base"]
     shm_size: "8g"
     init: true
     ports:
@@ -52,17 +74,17 @@ services:
   # ---------------------------------------------------------------------------
   # cap-y:default — + cuRobo + ContactGraspNet (NVIDIA NC license)
   # Commercial use: NOT permitted without separate NVIDIA licensing.
-  # Default profile: default (SAM3 + ContactGraspNet + PyRoKi)
   # ---------------------------------------------------------------------------
   cap-y-default:
     build:
       context: ..
-      dockerfile: docker/Dockerfile
+      dockerfile: docker/${PLATFORM_ARCH:-aarch64}/Dockerfile
       args:
         BASE_IMAGE: cap-y:base
         CUDA_ARCH_BIN: "${CUDA_ARCH_BIN:-11.0}"
     image: cap-y:default
     runtime: nvidia
+    profiles: ["default"]
     shm_size: "8g"
     init: true
     ports:
@@ -96,14 +118,13 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # cap-y:open — + ROS2 full stack + dfx_inspire_service
-  # Builds FROM cap-y:base (inherits mink, rh56, DemoGrasp).
+  # cap-y:open — + ROS2 full stack + nvblox + Drake + dfx_inspire_service
   # License ceiling: Meta SAM License. Commercially deployable.
   # ---------------------------------------------------------------------------
   cap-y-open:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.open
+      dockerfile: docker/${PLATFORM_ARCH:-aarch64}/Dockerfile.open
       args:
         BASE_IMAGE: cap-y:base
         CUDA_ARCH_BIN: "${CUDA_ARCH_BIN:-11.0}"
@@ -140,12 +161,12 @@ services:
 
   # ---------------------------------------------------------------------------
   # cap-y:nvidia — + Isaac ROS cuMotion + cuVSLAM + ScheduleStream
-  # Builds FROM cap-y:open. Requires NVIDIA Source Code License Agreement.
+  # Requires NVIDIA Source Code License Agreement.
   # ---------------------------------------------------------------------------
   cap-y-nvidia:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.nvidia
+      dockerfile: docker/${PLATFORM_ARCH:-aarch64}/Dockerfile.nvidia
       args:
         BASE_IMAGE: cap-y:open
     image: cap-y:nvidia
@@ -183,11 +204,12 @@ services:
   cap-y-dev:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.dev
+      dockerfile: docker/${PLATFORM_ARCH:-aarch64}/Dockerfile.dev
       args:
         BASE_IMAGE: cap-y:base
     image: cap-y:dev
     runtime: nvidia
+    profiles: ["dev"]
     shm_size: "16g"
     init: true
     stdin_open: true
@@ -212,6 +234,7 @@ services:
   capx-base:
     image: cap-y:base
     runtime: nvidia
+    profiles: ["shell"]
     shm_size: "8g"
     init: true
     stdin_open: true
@@ -275,6 +298,20 @@ services:
       - ROS_DISTRO=jazzy
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
     command: ["/workspace/scripts/test_container_nvidia.py"]
+
+  capx-test-default:
+    image: cap-y:default
+    runtime: nvidia
+    entrypoint: python
+    profiles: ["test-default"]
+    volumes:
+      - ..:/workspace
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - MUJOCO_GL=egl
+      - CAPY_REQUIRE_LICENSED_STACK=1
+    command: ["/workspace/scripts/test_container_base.py"]
 
   capx-test-dev:
     image: cap-y:dev
