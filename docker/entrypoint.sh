@@ -3,6 +3,17 @@ set -e
 
 cd /workspace
 
+# Verify OpenCV was built with CUDA (libcuda.so.1 requires live GPU — cannot check at build time)
+python3 -c "
+import cv2, sys
+info = cv2.getBuildInformation()
+if 'CUDA' not in info:
+    print('[entrypoint] WARNING: OpenCV was NOT built with CUDA support', file=sys.stderr)
+else:
+    cuda_lines = [l.strip() for l in info.splitlines() if any(k in l for k in ('CUDA','cuDNN','NVCUVID','NvVideoCodec'))]
+    print('[entrypoint] OpenCV', cv2.__version__, '— CUDA build OK:', ', '.join(cuda_lines[:3]))
+" 2>/dev/null || true
+
 # Tegra/Jetson containers run as root over host-owned bind mounts
 git config --global --add safe.directory '*' 2>/dev/null || true
 
@@ -13,8 +24,13 @@ if [[ -z "${HF_TOKEN}" && -f .huggingfacekey ]]; then
 fi
 
 if [[ -f pyproject.toml ]]; then
-  echo "[entrypoint] Re-installing cap-x in editable mode..."
-  if ! uv pip install --system -e ".[contactgraspnet,curobo]" --no-build-isolation 2>&1; then
+  # CAPX_INSTALL_EXTRAS is set per image (base="", default="contactgraspnet,curobo", etc.)
+  # so this editable reinstall only re-links extensions already compiled in the image.
+  _EXTRAS="${CAPX_INSTALL_EXTRAS:-}"
+  _TARGET="${_EXTRAS:+.[${_EXTRAS}]}"
+  _TARGET="${_TARGET:-"."}"
+  echo "[entrypoint] Re-installing cap-x in editable mode (extras: ${_EXTRAS:-none})..."
+  if ! uv pip install --system -e "${_TARGET}" --no-build-isolation 2>&1; then
     echo "[entrypoint] WARNING: editable reinstall had errors; CUDA extensions may be stale"
   fi
 fi
