@@ -9,7 +9,7 @@ Task list for delegation to subagents or contributors. Each item is scoped to be
 Build all four container images on a self-hosted Jetson Thor runner, push to GHCR, and run the test cascade on every push to `main`.
 
 - Set up GitHub Actions self-hosted runner on Jetson Thor (`runs-on: [self-hosted, jetson-thor]`)
-- Workflow: `build.sh --all` → push to `ghcr.io/sevapru/cap-y:{base,default,open,nvidia}` → run `capx-test`, `capx-test-open`, `capx-test-nvidia` profiles
+- Workflow: `build.sh --all` → push to `ghcr.io/sevapru/cap-y:{base,default,open,nvidia}` → run `capx-test`, `capx-test-default`, `capx-test-open`, `capx-test-nvidia` compose profiles
 - Cache: mount ccache and uv-cache as named Docker volumes between runs
 - Gate: fail PR merge if any test profile returns non-zero
 

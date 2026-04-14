@@ -103,14 +103,17 @@ flowchart LR
 
 ## Get Started
 
-The fastest path is via Docker Compose — it handles GPU passthrough, volumes, and environment automatically. Use `capx-base` for interactive exploration without starting any servers:
+The fastest path is via Docker Compose — it handles GPU passthrough, volumes, and environment automatically. Runtime stacks use **profiles** so overlapping ports are not bound twice; `docker compose up` with no `--profile` starts no stack services.
+
+Use `capx-base` (profile `shell`) for interactive exploration without starting perception servers:
 
 ```bash
-# Drop into bash with GPU access and source mounted — no servers started
-docker compose -f docker/docker-compose.capx.yml run --rm capx-base
+# From repo root — bash + GPU + /workspace bind mount; no servers
+docker compose -f docker/docker-compose.capx.yml --profile shell run --rm -it capx-base
 
-# Or start servers first, then get a shell with setup (editable install runs on entry)
-docker compose -f docker/docker-compose.capx.yml run --rm capx-serving bash
+# Or start a stack, then open a shell (entrypoint runs editable install on container start)
+docker compose -f docker/docker-compose.capx.yml --profile base up -d cap-y-base
+docker compose -f docker/docker-compose.capx.yml --profile base exec -it cap-y-base bash
 ```
 
 The entrypoint runs an editable install of the package on every start so code changes in `/workspace` are picked up immediately without a rebuild. Pass any command to override the default server launch.
@@ -144,13 +147,14 @@ docker pull ghcr.io/sevapru/cap-y:nvidia
 docker run -it --rm --runtime nvidia --entrypoint bash -v .:/workspace ghcr.io/sevapru/cap-y:nvidia
 ```
 
-Verify after pull (runs base + layer-specific checks):
+Verify after pull (GPU required; each line is a separate image check):
 ```bash
 cd cap-y/docker
 
 docker compose -f docker-compose.capx.yml --profile test run --rm capx-test
-# --profile test-open run --rm capx-test-open
-# --profile test-nvidia run --rm capx-test-nvidia
+docker compose -f docker-compose.capx.yml --profile test-default run --rm capx-test-default
+docker compose -f docker-compose.capx.yml --profile test-open run --rm capx-test-open
+docker compose -f docker-compose.capx.yml --profile test-nvidia run --rm capx-test-nvidia
 ```
 
 ### Build from Source (like... 3 hours?)
@@ -176,8 +180,14 @@ grep -i "error:" /tmp/cap-y-build.log | grep -v warning
 
 ```bash
 cd cap-y/docker
-docker compose -f docker-compose.capx.yml up -d --build
+# Build any image directly (profiles do not affect `build`)
+docker compose -f docker-compose.capx.yml build cap-y-base
+
+# Start one stack — pick a profile: base | default | open | nvidia
+docker compose -f docker-compose.capx.yml --profile base up -d --build cap-y-base
 ```
+
+`COMPOSE_PROFILES` (comma-separated) is equivalent to repeating `--profile` ([Compose reference](https://github.com/docker/compose/blob/main/docs/reference/compose.md)). Use **one** of `base`, `default`, `open`, or `nvidia` for running servers so ports do not collide.
 
 Build args:
 
@@ -196,18 +206,24 @@ docker compose -f docker-compose.capx.yml build \
 
 ### Start Perception Servers
 
+Set `CAPX_PROFILE` to choose which cap-x HTTP backends the entrypoint starts (`open`, `default`, `full`, `minimal`, …); that is independent of **which Docker image** you run.
+
 ```bash
 cd cap-y/docker
 # cap-y:base (commercial-safe: SAM3 + DemoGrasp + rh56 + PyRoKi)
-docker compose -f docker-compose.capx.yml up -d cap-y-base
+docker compose -f docker-compose.capx.yml --profile base up -d cap-y-base
 
 # cap-y:default (research: SAM3 + ContactGraspNet + PyRoKi — NC license)
-docker compose -f docker-compose.capx.yml up -d cap-y-default
+docker compose -f docker-compose.capx.yml --profile default up -d cap-y-default
 
 # cap-y:open (commercial-safe + ROS2 stack)
-CAPX_PROFILE=full docker compose -f docker-compose.capx.yml --profile open up -d
+CAPX_PROFILE=full docker compose -f docker-compose.capx.yml --profile open up -d cap-y-open
 
-CAPX_PROFILE=minimal docker compose -f docker-compose.capx.yml up -d    # PyRoKi only (IK go brrrr 🏎️)
+# cap-y:nvidia (open + Isaac ROS extras)
+docker compose -f docker-compose.capx.yml --profile nvidia up -d cap-y-nvidia
+
+# PyRoKi-only server set inside whichever image you chose (e.g. base)
+CAPX_PROFILE=minimal docker compose -f docker-compose.capx.yml --profile base up -d cap-y-base
 ```
 
 Interactive shell:
@@ -225,8 +241,13 @@ alias cap-y='docker run -it --rm --runtime nvidia --entrypoint bash -v .:/worksp
 
 ```bash
 cd cap-y/docker
-docker compose -f docker-compose.capx.yml --profile test run --rm capx-test  # Expected: 9/9
+docker compose -f docker-compose.capx.yml --profile test run --rm capx-test
+docker compose -f docker-compose.capx.yml --profile test-default run --rm capx-test-default
+docker compose -f docker-compose.capx.yml --profile test-open run --rm capx-test-open
+docker compose -f docker-compose.capx.yml --profile test-nvidia run --rm capx-test-nvidia
 ```
+
+`capx-test` skips cuRobo / ContactGraspNet on `cap-y:base` (not installed there). `capx-test-default` sets `CAPY_REQUIRE_LICENSED_STACK=1` so those packages must import on `cap-y:default`. Open and NVIDIA suites include the base checks plus ROS / Isaac layers.
 
 ## Pre-built Wheels
 
