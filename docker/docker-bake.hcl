@@ -60,9 +60,7 @@ function "tags" {
 
 function "tags_with_latest" {
   params = [name]
-  result = REGISTRY != "" \
-    ? ["${REGISTRY}:${name}-${TARGETARCH}", "${REGISTRY}:latest-${TARGETARCH}"] \
-    : ["cap-y:${name}"]
+  result = REGISTRY != "" ? ["${REGISTRY}:${name}-${TARGETARCH}", "${REGISTRY}:latest-${TARGETARCH}"] : ["cap-y:${name}"]
 }
 
 
