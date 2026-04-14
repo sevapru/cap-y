@@ -1,0 +1,85 @@
+# cap-y:open (x86_64) — commercially-safe container (Apache 2.0 / BSD / MIT only)
+#
+# ── Dependency chain ─────────────────────────────────────────────────────────
+#   nvcr.io/nvidia/cuda:13.0.0-cudnn-devel-ubuntu24.04
+#   └── cap-y:base   (x86_64/Dockerfile.base  — GPU wheels, mink, DemoGrasp, JAX)
+#       └── cap-y:open
+#
+# Extends cap-y:base with the full open-source robotics stack.
+# Safe for commercial deployments under Meta SAM License (SAM3) conditions.
+#
+# License ceiling: Meta SAM License (SAM3 — redistribution + publication acknowledgment required)
+# All other additions: Apache 2.0 / BSD 3-Clause / MIT
+#
+# Adds on top of cap-y:base:
+#   - ROS 2 Jazzy full stack: Nav2, MoveIt 2, ros2_control (Apache 2.0)
+#   - CycloneDDS RMW (EPL-2.0 / EDL-1.0)
+#   - nvblox C++ core (Apache 2.0) — NOT the Isaac ROS wrapper
+#   - Drake / GCS (BSD 3-Clause) — x86_64 pip wheel available
+#   - LiveKit Python SDK (Apache 2.0)
+#   - dfx_inspire_service (BSD 3-Clause)
+#
+# Already in cap-y:base:
+#   - mink, rh56_controller, DemoGrasp, Newton
+#   - OpenCV CUDA (cudawarped), Open3D, PyTorch cu130, JAX cuda13
+#   - SAM3, pyroki, ROS 2 Jazzy minimal client
+
+ARG BASE_IMAGE=cap-y:base
+FROM ${BASE_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake ninja-build ccache \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+      -o /usr/share/keyrings/ros-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
+      http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" \
+      > /etc/apt/sources.list.d/ros2.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
+      ros-${ROS_DISTRO}-ros-base \
+      ros-${ROS_DISTRO}-nav2-bringup \
+      ros-${ROS_DISTRO}-moveit \
+      ros-${ROS_DISTRO}-ros2-control \
+      ros-${ROS_DISTRO}-ros2-controllers \
+      ros-${ROS_DISTRO}-cyclonedds \
+      ros-${ROS_DISTRO}-rmw-cyclonedds-cpp \
+      python3-colcon-common-extensions \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+
+RUN --mount=type=cache,target=/root/.ccache \
+    git clone --depth 1 --branch public https://github.com/nvidia-isaac/nvblox.git /opt/nvblox && \
+    cd /opt/nvblox && mkdir build && cd build && \
+    cmake .. \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr/local \
+      -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+      -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+      -DCMAKE_PREFIX_PATH="$(python3 -c 'import torch; print(torch.utils.cmake_prefix_path)')" \
+      -DCMAKE_CUDA_ARCHITECTURES="$(echo ${CUDA_ARCH_BIN} | tr -d '.')" \
+      -DBUILD_TESTING=OFF \
+    && make -j$(nproc) && make install && ldconfig \
+    && rm -rf /opt/nvblox
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system drake
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system livekit livekit-agents livekit-plugins-silero
+
+RUN mkdir -p /opt/inspire_ws/src && \
+    git clone --depth 1 https://github.com/unitreerobotics/dfx_inspire_service \
+      /opt/inspire_ws/src/dfx_inspire_service || \
+    echo "INFO: dfx_inspire_service clone failed (may require network access at build time)" && \
+    if [ -d /opt/inspire_ws/src/dfx_inspire_service ]; then \
+      cd /opt/inspire_ws && \
+      . /opt/ros/${ROS_DISTRO}/setup.bash && \
+      colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release && \
+      echo '. /opt/inspire_ws/install/setup.bash' >> /root/.bashrc; \
+    fi
+
+RUN echo '. /opt/ros/${ROS_DISTRO}/setup.bash' >> /root/.bashrc

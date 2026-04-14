@@ -1,0 +1,68 @@
+ARG BASE_IMAGE=cap-y:base
+FROM ${BASE_IMAGE}
+
+# CUDA_ARCH_BIN is inherited from cap-y:base ENV — no re-declaration needed.
+# PYTHON_VERSION is an ARG (not ENV) in base, so it must be re-declared here.
+ARG PYTHON_VERSION="3.12"
+
+# All extras compiled in this image — re-link them all on source mounts.
+ENV CAPX_INSTALL_EXTRAS="dev,contactgraspnet,curobo,ovdet"
+
+# cap-y:dev (x86_64) — all extras, both sim venvs, no caches cleaned.
+#
+# ── Dependency chain ─────────────────────────────────────────────────────────
+#   nvcr.io/nvidia/cuda:13.0.0-cudnn-devel-ubuntu24.04
+#   └── cap-y:base   (x86_64/Dockerfile.base  — GPU wheels, mink, DemoGrasp, JAX)
+#       └── cap-y:dev
+#
+# ── What this adds over cap-y:base ──────────────────────────────────────────
+#   - dev/curobo/contactgraspnet/ovdet extras (system Python)
+#   - /opt/venv-robosuite  (robosuite + ContactGraspNet — separate venv)
+#   - /opt/venv-libero     (LIBERO-PRO + ContactGraspNet — separate venv)
+#   - cmake + ninja for CUDA extension compilation
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake ninja-build ccache \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /tmp/capx-dev-install
+COPY pyproject.toml .
+COPY capx/third_party/sam3 capx/third_party/sam3
+COPY capx/third_party/contact_graspnet_pytorch capx/third_party/contact_graspnet_pytorch
+COPY capx/third_party/curobo capx/third_party/curobo
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.ccache \
+    mkdir -p capx && touch capx/__init__.py && \
+    patch-pyproject-x86.sh pyproject.toml && \
+    SETUPTOOLS_SCM_PRETEND_VERSION=0.7.0 \
+    uv pip install --system --no-build-isolation \
+      ".[dev,curobo,contactgraspnet,ovdet]"
+
+COPY capx/third_party/libero_dependencies capx/third_party/libero_dependencies
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.ccache \
+    uv venv /opt/venv-robosuite --python python${PYTHON_VERSION} --system-site-packages && \
+    SETUPTOOLS_SCM_PRETEND_VERSION=0.7.0 \
+    uv pip install --python /opt/venv-robosuite/bin/python \
+      --no-build-isolation ".[robosuite,contactgraspnet]" || \
+    echo "WARNING: robosuite venv had errors (check network or deps)"
+
+COPY capx/third_party/LIBERO-PRO capx/third_party/LIBERO-PRO
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.ccache \
+    uv venv /opt/venv-libero --python python${PYTHON_VERSION} --system-site-packages && \
+    patch-pyproject-x86.sh pyproject.toml && \
+    SETUPTOOLS_SCM_PRETEND_VERSION=0.7.0 \
+    uv pip install --python /opt/venv-libero/bin/python \
+      --no-build-isolation ".[libero,contactgraspnet]" || \
+    echo "WARNING: libero venv had errors (check network or deps)"
+
+RUN rm -rf /tmp/capx-dev-install
+
+RUN echo 'alias activate-robosuite="source /opt/venv-robosuite/bin/activate"' >> /root/.bashrc && \
+    echo 'alias activate-libero="source /opt/venv-libero/bin/activate"' >> /root/.bashrc
+
+WORKDIR /workspace

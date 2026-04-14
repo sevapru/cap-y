@@ -1,0 +1,61 @@
+# cap-y:nvidia (x86_64) — NVIDIA-licensed container (research / enterprise agreement)
+#
+# ── Dependency chain ─────────────────────────────────────────────────────────
+#   nvcr.io/nvidia/cuda:13.0.0-cudnn-devel-ubuntu24.04
+#   └── cap-y:base   (x86_64/Dockerfile.base  — GPU wheels, mink, DemoGrasp, JAX)
+#       └── cap-y:open  (x86_64/Dockerfile.open  — ROS2 full, nvblox, Drake)
+#           └── cap-y:nvidia
+#
+# ── What this adds over cap-y:open ──────────────────────────────────────────
+#   All installed via apt deb packages from isaac.download.nvidia.com/isaac-ros
+#   (x86_64 key difference: pre-built debs vs colcon source build on aarch64):
+#   - ros-jazzy-isaac-ros-nitros           NVIDIA Source Code License
+#   - ros-jazzy-isaac-ros-cumotion         NVIDIA Source Code License
+#   - ros-jazzy-isaac-ros-visual-slam      NVIDIA Source Code License (cuVSLAM)
+#   - ros-jazzy-nvblox (Isaac ROS wrapper) NVIDIA Source Code License
+#   - nvidia-cutamp                        NVIDIA Research License NC (pip)
+#   - ScheduleStream                       NVIDIA NC License (pip)
+#
+# ── License ──────────────────────────────────────────────────────────────────
+#   Requires: NVIDIA Enterprise Agreement (production) OR
+#             NVIDIA Research License (academic/research use)
+#
+# ── x86_64 vs aarch64 difference ────────────────────────────────────────────
+#   aarch64: clones GitHub repos + colcon build from source (slow, ~20 min)
+#   x86_64:  apt-get install from NVIDIA Isaac ROS release repo (fast, ~2 min)
+#            apt packages are pre-compiled for x86_64 by NVIDIA
+
+ARG BASE_IMAGE=cap-y:open
+FROM ${BASE_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    ROS_DISTRO=jazzy
+
+# Isaac ROS apt repository (release-4.3, Noble x86_64)
+# Pre-built deb packages — no colcon build needed on x86_64
+RUN curl -fsSL https://isaac.download.nvidia.com/isaac-ros/repos.key \
+      | gpg --dearmor -o /usr/share/keyrings/nvidia-isaac-ros.gpg && \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/nvidia-isaac-ros.gpg] \
+      https://isaac.download.nvidia.com/isaac-ros/release-4.3 noble main" \
+      > /etc/apt/sources.list.d/nvidia-isaac-ros.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
+      ros-${ROS_DISTRO}-isaac-ros-common \
+      ros-${ROS_DISTRO}-isaac-ros-nitros \
+      ros-${ROS_DISTRO}-isaac-ros-cumotion \
+      ros-${ROS_DISTRO}-isaac-ros-visual-slam \
+      ros-${ROS_DISTRO}-nvblox \
+    && rm -rf /var/lib/apt/lists/* \
+    || echo "WARNING: Some Isaac ROS packages may require NVIDIA entitlement — install manually if above fails"
+
+# cuTAMP (NVIDIA Research License NC) — pip wheel
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system nvidia-cutamp 2>/dev/null || \
+      echo "INFO: cuTAMP not available via pip, obtain from NVIDIA NGC"
+
+# ScheduleStream (NVIDIA NC License) — pip editable install
+RUN --mount=type=cache,target=/root/.cache/uv \
+    git clone --depth 1 https://github.com/NVlabs/ScheduleStream.git /opt/schedulestream && \
+    uv pip install --system -e /opt/schedulestream 2>/dev/null || \
+      echo "INFO: ScheduleStream install failed (may need cuRobo runtime)"
+
+RUN echo '. /opt/isaac_ros_ws/install/setup.bash 2>/dev/null || true' >> /root/.bashrc

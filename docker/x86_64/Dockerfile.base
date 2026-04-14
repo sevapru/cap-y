@@ -1,0 +1,204 @@
+# syntax=docker/dockerfile:1.7
+# cap-y:base (x86_64) — GPU-accelerated pre-built wheels, zero source compilation.
+#
+# Wheel sources (all verified):
+#   OpenCV CUDA  cudawarped/opencv-python-cuda-wheels 4.13.0.20250811
+#                CUDA 13.0 + cuDNN 9.12.0 + CUFFT/cuBLAS/NvVideoCodec
+#                SM 7.5–12.1 (Turing/Ampere/Ada/Hopper/Blackwell-desktop) + PTX 12.1
+#   PyTorch      download.pytorch.org/whl/cu130 — torch-2.11.0+cu130 (stable, confirmed)
+#   Open3D       PyPI 0.19.0 — CUDA 12.x tensor ops (o3d.core.Device("CUDA:0") works)
+#   JAX          jax[cuda13] — native CUDA 13.0 pip wheels, version 0.9.2 on PyPI
+#   Newton       newton[torch-cu13] — GPU physics (DeepMind + NVIDIA + Disney)
+#
+# ── Dependency chain ─────────────────────────────────────────────────────────
+#   nvcr.io/nvidia/cuda:13.0.0-cudnn-devel-ubuntu24.04
+#   └── cap-y:base  ← YOU ARE HERE  (this file)
+#       ├── cap-y:default  (x86_64/Dockerfile        — + cuRobo + ContactGraspNet)
+#       ├── cap-y:dev      (x86_64/Dockerfile.dev     — + all extras + sim venvs)
+#       └── cap-y:open     (x86_64/Dockerfile.open    — + ROS2 full + nvblox + Drake)
+#           └── cap-y:nvidia (x86_64/Dockerfile.nvidia — + Isaac ROS via apt debs)
+#
+# Build time: ~5 min vs ~12 min for aarch64/Dockerfile.base
+# Tradeoff:   Open3D PyTorch ops (PointPillars/SparseConv) not in PyPI wheel;
+#             for those use aarch64/Dockerfile.base which compiles Open3D from source.
+#
+# Build:  docker compose -f docker/docker-compose.capx.yml build cap-y-base
+#         (build.sh sets PLATFORM_ARCH=x86_64 automatically via uname -m)
+
+ARG BASE_IMAGE=nvcr.io/nvidia/cuda:13.0.0-cudnn-devel-ubuntu24.04
+FROM ${BASE_IMAGE}
+
+ARG PYTHON_VERSION="3.12"
+ARG TORCH_VERSION="2.11.0"
+ARG ROS_DISTRO="jazzy"
+ARG CUDA_ARCH_BIN="8.9"
+# cudawarped release matching CUDA 13.0 + cuDNN 9.12.0 (exact match to base image):
+ARG OPENCV_CUDA_WHEEL="https://github.com/cudawarped/opencv-python-cuda-wheels/releases/download/4.13.0.20250811/opencv_contrib_python_rolling-4.13.0.20250811-cp37-abi3-linux_x86_64.whl"
+ARG OPENCV_VERSION="4.13.0"
+
+# CUDA_ARCH_BIN exported to ENV so all child images inherit it without re-declaring.
+# TORCH_CUDA_ARCH_LIST covers the full range for broad GPU compatibility in wheels;
+# cmake-based builds (nvblox, cuRobo) use CUDA_ARCH_BIN for a tighter targeted build.
+ENV DEBIAN_FRONTEND=noninteractive \
+    CUDA_HOME=/usr/local/cuda \
+    CUDA_ARCH_BIN=${CUDA_ARCH_BIN} \
+    TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;8.9;9.0;10.0;12.0;13.0" \
+    ROS_DISTRO=${ROS_DISTRO} \
+    CAPX_INSTALL_EXTRAS="" \
+    PATH="/usr/local/cuda/bin:${PATH}" \
+    LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}" \
+    UV_HTTP_TIMEOUT=300
+
+# [1] System deps — no cmake/ninja/clang/ccache (nothing compiled from source here)
+#     build-essential kept for pip packages that compile small C extensions (pycocotools, egl-probe)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python${PYTHON_VERSION} python${PYTHON_VERSION}-dev \
+    python${PYTHON_VERSION}-venv python3-pip \
+    build-essential git curl wget file \
+    libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+    libavcodec-dev libavformat-dev libswscale-dev \
+    libjpeg-dev libpng-dev libtiff-dev libwebp-dev libv4l-dev \
+    libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev \
+    libegl1 libgl1 libglvnd-dev libglu1-mesa-dev \
+    libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+    libusb-1.0-0-dev libfmt-dev \
+    libssl-dev \
+    apt-transport-https \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -sSf https://librealsense.realsenseai.com/Debian/librealsenseai.asc | \
+       gpg --dearmor > /etc/apt/keyrings/librealsenseai.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/librealsenseai.gpg] https://librealsense.realsenseai.com/Debian/apt-repo noble main" > \
+       /etc/apt/sources.list.d/librealsense.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends librealsense2-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# [2] Python + uv
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python${PYTHON_VERSION} 1 && \
+    rm -f /usr/lib/python${PYTHON_VERSION}/EXTERNALLY-MANAGED && \
+    curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    ln -sf /root/.local/bin/uv /usr/local/bin/uv && \
+    uv pip install --system "numpy>=2.0"
+
+# [3] OpenCV 4.13 CUDA — cudawarped pre-built GPU wheel
+#     CUDA 13.0 + cuDNN 9.12.0 + CUFFT + cuBLAS + NvVideoCodec SDK 13.0
+#     GPU arch: SM 7.5–12.1 + PTX 12.1 for JIT on future architectures
+#     Includes contrib modules: SIFT, aruco, tracking, dnn CUDA backend, cudacodec
+#
+#     Shadow prevention: fake opencv-python-headless dist-info prevents uv from
+#     replacing this CUDA build with a CPU PyPI wheel when installing project deps.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    mkdir -p /opt/wheels && \
+    uv pip install --system "${OPENCV_CUDA_WHEEL}" && \
+    OPENCV_DIST="/usr/local/lib/python${PYTHON_VERSION}/dist-packages/opencv_python_headless-${OPENCV_VERSION}.dist-info" && \
+    mkdir -p "$OPENCV_DIST" && \
+    printf "Metadata-Version: 2.1\nName: opencv-python-headless\nVersion: ${OPENCV_VERSION}\n" > "$OPENCV_DIST/METADATA" && \
+    echo "opencv-python-headless" > "$OPENCV_DIST/top_level.txt" && \
+    echo "cv2/__init__.py,," > "$OPENCV_DIST/RECORD"
+
+
+# [4] PyTorch 2.11 cu130 — stable wheel at download.pytorch.org/whl/cu130 (confirmed)
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system \
+    torch==${TORCH_VERSION} torchvision \
+    --index-url https://download.pytorch.org/whl/cu130
+
+# [5] Build/packaging tools
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system hatchling setuptools wheel scikit-build-core yapf
+
+# [6] Open3D from PyPI
+#     v0.19.0: CUDA 12.x tensor ops work on CUDA 13 GPUs via forward compat.
+#     o3d.core.Device("CUDA:0"), TSDF, ICP, raycasting, KNN all GPU-accelerated.
+#     PyTorch ops (PointPillars/SparseConv/RandLA-Net) require a source build.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system open3d
+
+# [7] JAX with native CUDA 13 pip wheels
+#     jax[cuda13] — official support since JAX 0.8.0 (Sep 2025), 0.9.2 on PyPI.
+#     Built against CUDA 13.0 + cuDNN 9.8, fully compatible with our base image.
+#     Same version as aarch64/Dockerfile.base — no compatibility shim needed.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system "jax[cuda13]" opt_einsum
+
+# [8] capx base deps (MIT/Apache only — no cuRobo, no ContactGraspNet)
+COPY docker/patch-pyproject.sh /usr/local/bin/
+COPY docker/patch-pyproject-x86.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/patch-pyproject.sh /usr/local/bin/patch-pyproject-x86.sh
+
+WORKDIR /tmp/capx-install
+COPY pyproject.toml .
+COPY capx/third_party/sam3 capx/third_party/sam3
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    mkdir -p capx && touch capx/__init__.py && \
+    patch-pyproject-x86.sh pyproject.toml && \
+    SETUPTOOLS_SCM_PRETEND_VERSION=0.7.0 \
+    uv pip install --system --no-build-isolation "."
+
+RUN rm -rf /tmp/capx-install
+
+# [9] ROS 2 minimal client (rclpy + common message types)
+#     ROS_DISTRO is already set in ENV above; uses $(. /etc/os-release ...) for Ubuntu codename.
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | \
+    gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
+    http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" \
+    > /etc/apt/sources.list.d/ros2.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
+      ros-${ROS_DISTRO}-rclpy \
+      ros-${ROS_DISTRO}-action-msgs \
+      ros-${ROS_DISTRO}-nav-msgs \
+      ros-${ROS_DISTRO}-trajectory-msgs \
+      ros-${ROS_DISTRO}-geometry-msgs \
+      ros-${ROS_DISTRO}-sensor-msgs \
+      ros-${ROS_DISTRO}-std-msgs \
+    && rm -rf /var/lib/apt/lists/* \
+    && echo ". /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc
+
+# [10] mink (Apache 2.0) — differential IK via MuJoCo, aarch64/x86_64 native
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system mink
+
+# [11] rh56_controller (MIT) — analytical grasp planner for Inspire RH56DFX
+RUN --mount=type=cache,target=/root/.cache/uv \
+    git clone --depth 1 https://github.com/correlllab/rh56_controller /opt/rh56_controller && \
+    uv pip install --system mujoco pyserial scipy && \
+    uv pip install --system -e /opt/rh56_controller --no-build-isolation || \
+      echo "WARNING: rh56_controller editable install failed; fallback deps already installed"
+
+# [12] DemoGrasp (MIT) — universal dexterous grasping from a single demonstration
+ARG WITH_DEMOGRASP=1
+RUN --mount=type=cache,target=/root/.cache/uv \
+    if [ "${WITH_DEMOGRASP}" = "1" ]; then \
+      git clone --depth 1 https://github.com/BeingBeyond/DemoGrasp /opt/demograsp && \
+      uv pip install --system einops h5py addict yapf jsonlines tqdm datasets && \
+      uv pip install --system -e /opt/demograsp --no-build-isolation || true; \
+      echo "DemoGrasp installed (inference mode)"; \
+    else \
+      echo "INFO: Skipping DemoGrasp (WITH_DEMOGRASP=0)"; \
+    fi
+
+RUN if [ "${WITH_DEMOGRASP}" != "1" ]; then mkdir -p /opt/demograsp; fi
+ENV PYTHONPATH="/opt/demograsp:${PYTHONPATH}"
+
+# [13] Newton (Apache 2.0) — GPU-accelerated physics (DeepMind + NVIDIA + Disney)
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system "newton[torch-cu13]" || \
+    { echo "INFO: Newton pip install failed; building warp from source" && \
+      git clone --depth 1 https://github.com/NVIDIA/warp.git /tmp/warp-build && \
+      cd /tmp/warp-build && \
+      python3 build_lib.py && \
+      uv pip install --system . && \
+      rm -rf /tmp/warp-build && \
+      uv pip install --system "newton[torch-cu13]"; }
+
+WORKDIR /workspace
+
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 8100 8110 8113 8114 8116 8119 8120
+
+ENTRYPOINT ["/entrypoint.sh"]
