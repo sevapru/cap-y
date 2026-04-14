@@ -86,3 +86,5 @@ RUN echo 'alias activate-robosuite="source /opt/venv-robosuite/bin/activate"' >>
 WORKDIR /workspace
 
 # NOTE: No CLEAN_CACHES — caches intentionally kept for iteration speed.
+ENTRYPOINT []
+CMD ["bash"]

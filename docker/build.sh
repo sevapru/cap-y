@@ -135,13 +135,34 @@ echo ""
 
 CUDA_ARCH_BIN="${CUDA_ARCH_BIN}" WITH_DEMOGRASP="${WITH_DEMOGRASP:-1}" \
   REGISTRY="${BAKE_REGISTRY}" \
-  docker buildx bake -f "${BAKE_FILE}" --progress=plain "${BAKE_ARGS[@]}" ${BAKE_TARGET} \
+  docker buildx bake -f "${BAKE_FILE}" "${BAKE_ARGS[@]}" ${BAKE_TARGET} \
   2>&1 | tee "${LOG_FILE}"
 
 echo ""
 echo "Built images:"
-docker image ls --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}' \
-  --filter reference='cap-y:*'
+docker image ls cap-y
+
+if [[ "$PUSH" = "1" ]]; then
+  ARCH="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+  echo ""
+  echo "Pushing to ${REGISTRY} (arch: ${ARCH})..."
+  for img in base default open nvidia dev; do
+    TAG="${REGISTRY}:${img}-${ARCH}"
+    if docker image inspect "${TAG}" &>/dev/null 2>&1; then
+      echo "  pushing ${TAG}"
+      docker push "${TAG}"
+    fi
+  done
+  # latest-<arch> is an alias for open
+  LATEST_TAG="${REGISTRY}:latest-${ARCH}"
+  if docker image inspect "${LATEST_TAG}" &>/dev/null 2>&1; then
+    echo "  pushing ${LATEST_TAG}"
+    docker push "${LATEST_TAG}"
+  fi
+  echo ""
+  echo "Pushed tags:"
+  docker image ls "${REGISTRY}"
+fi
 if [[ "$PUSH" = "1" ]]; then
   docker image ls --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}' \
     --filter "reference=${REGISTRY}:*"

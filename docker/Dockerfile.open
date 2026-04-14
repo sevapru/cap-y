@@ -12,7 +12,9 @@
 #   - nvblox C++ core (Apache 2.0) — built from source on both arches
 #   - Drake (BSD 3-Clause) — x86_64 pip wheel; skipped on aarch64 (no wheel)
 #   - LiveKit Python SDK (Apache 2.0)
-#   - dfx_inspire_service (BSD 3-Clause)
+#   - dfx_inspire_service (BSD 3-Clause) — source only, C++ build skipped
+#   - pymodbus (MIT) — Modbus TCP driver for Inspire RH56DFTP (in cap-y:base)
+#   - unitree_sdk2_python (BSD-3) — Python DDS SDK for Unitree robots (in cap-y:base)
 #
 # ── License ceiling ──────────────────────────────────────────────────────────
 #   Meta SAM License (SAM3 — redistribution + publication acknowledgment)
@@ -55,6 +57,7 @@ ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 # nvblox C++ core (Apache 2.0) — built from source on both arches.
 # CUDA_ARCH_BIN is inherited from cap-y:base ENV.
 RUN --mount=type=cache,target=/root/.ccache \
+    --mount=type=cache,target=/root/.cache/nvblox-deps \
     git clone --depth 1 --branch public https://github.com/nvidia-isaac/nvblox.git /opt/nvblox && \
     cd /opt/nvblox && mkdir build && cd build && \
     cmake .. \
@@ -62,6 +65,7 @@ RUN --mount=type=cache,target=/root/.ccache \
       -DCMAKE_INSTALL_PREFIX=/usr/local \
       -DCMAKE_C_COMPILER_LAUNCHER=ccache \
       -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+      -DFETCHCONTENT_BASE_DIR=/root/.cache/nvblox-deps \
       -DCMAKE_PREFIX_PATH="$(python3 -c 'import torch; print(torch.utils.cmake_prefix_path)')" \
       -DCMAKE_CUDA_ARCHITECTURES="$(echo ${CUDA_ARCH_BIN:-8.9} | tr -d '.')" \
       -DBUILD_TESTING=OFF \
@@ -80,16 +84,23 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system livekit livekit-agents livekit-plugins-silero
 
-# dfx_inspire_service — Unitree Inspire RH56DFX ROS2 hand controller (BSD 3-Clause)
-RUN mkdir -p /opt/inspire_ws/src && \
-    git clone --depth 1 https://github.com/unitreerobotics/dfx_inspire_service \
-      /opt/inspire_ws/src/dfx_inspire_service || \
-    echo "INFO: dfx_inspire_service clone failed (may require network access at build time)" && \
-    if [ -d /opt/inspire_ws/src/dfx_inspire_service ]; then \
-      cd /opt/inspire_ws && \
-      . /opt/ros/${ROS_DISTRO}/setup.bash && \
-      colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release && \
-      echo '. /opt/inspire_ws/install/setup.bash' >> /root/.bashrc; \
-    fi
+# Unitree Inspire hand control — two drivers available:
+#
+#   RH56DFTP (Ethernet Modbus TCP):
+#     pymodbus is already installed in cap-y:base.
+#     Use robot_hand_inspire_modbus.py pattern (see github.com/ProsusAI/robot-teleop).
+#     No additional install needed here.
+#
+#   RH56DFX (DDS via dfx_inspire_service ROS2 package):
+#     dfx_inspire_service cloned to /opt/dfx_inspire_service for reference.
+#     C++ colcon build requires unitree_sdk2 C++ headers — skipped here.
+RUN git clone --depth 1 https://github.com/unitreerobotics/dfx_inspire_service \
+      /opt/dfx_inspire_service 2>/dev/null || \
+    echo "INFO: dfx_inspire_service clone unavailable (network)"
 
 RUN echo ". /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc
+
+ENV CAPX_PROFILE=open
+EXPOSE 8100 8110 8114 8116 8119 8120 8124
+ENTRYPOINT ["/entrypoint.sh"]
+CMD []

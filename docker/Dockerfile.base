@@ -350,6 +350,21 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -e /opt/rh56_controller --no-build-isolation || \
       echo "WARNING: rh56_controller editable install failed; fallback deps installed"
 
+# pymodbus (MIT) — direct Modbus TCP control for Inspire RH56DFTP hands
+#   Register map: ANGLE_SET=1486, ANGLE_ACT=1546, FORCE_SET=1498 (6×int16, 0-1000)
+#   Replaces proprietary inspire_sdkpy — see github.com/ProsusAI/robot-teleop
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system "pymodbus>=3.12"
+
+# unitree_sdk2_python (BSD-3) — Python SDK for Unitree DDS robot communication
+#   Covers G1/H1 LocoClient, MotionSwitcherClient, arm/hand modules
+#   No C++ compilation — pure Python + CycloneDDS bindings
+RUN --mount=type=cache,target=/root/.cache/uv \
+    git clone --depth 1 https://github.com/unitreerobotics/unitree_sdk2_python \
+      /opt/unitree_sdk2_python && \
+    uv pip install --system -e /opt/unitree_sdk2_python --no-build-isolation || \
+      echo "WARNING: unitree_sdk2_python install failed; install manually if needed"
+
 # DemoGrasp (MIT) — universal dexterous grasping from a single demonstration
 RUN --mount=type=cache,target=/root/.cache/uv \
     if [ "${WITH_DEMOGRASP}" = "1" ]; then \
@@ -382,5 +397,4 @@ WORKDIR /workspace
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-EXPOSE 8100 8110 8113 8114 8116 8119 8120
-ENTRYPOINT ["/entrypoint.sh"]
+CMD ["bash"]

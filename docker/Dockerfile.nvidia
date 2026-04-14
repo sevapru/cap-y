@@ -82,3 +82,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
       echo "INFO: ScheduleStream install failed (may need cuRobo runtime)"
 
 RUN echo '. /opt/isaac_ros_ws/install/setup.bash 2>/dev/null || true' >> /root/.bashrc
+
+ENV CAPX_PROFILE=nvidia
+EXPOSE 8100 8110 8114 8116 8119 8120 8124
+ENTRYPOINT ["/entrypoint.sh"]
+CMD []

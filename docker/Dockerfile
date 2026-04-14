@@ -50,5 +50,7 @@ RUN rm -rf /tmp/capx-default-install
 
 WORKDIR /workspace
 
+ENV CAPX_PROFILE=default
 EXPOSE 8110 8113 8114 8115 8116 8117 8118
 ENTRYPOINT ["/entrypoint.sh"]
+CMD []
