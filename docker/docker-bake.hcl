@@ -13,7 +13,7 @@
 # FROM source — no intermediate registry push needed.
 
 variable "CUDA_ARCH_BIN" {
-  default = ""   # auto-detected by the build ARG default inside Dockerfile.base
+  default = "8.9"   # RTX 40-series; override via: CUDA_ARCH_BIN=9.0 docker buildx bake ...
 }
 
 variable "WITH_DEMOGRASP" {
@@ -42,14 +42,27 @@ variable "TARGETARCH" {
   default = element(split("/", TARGETPLATFORM), 1)
 }
 
+function "local_tag" {
+  params = [name]
+  # Local tag only when not pushing — avoids attempting to push to docker.io/library/
+  result = REGISTRY != "" ? [] : ["cap-y:${name}"]
+}
+
 function "remote_tags" {
   params = [name]
   result = REGISTRY != "" ? ["${REGISTRY}:${name}-${TARGETARCH}"] : []
 }
 
-function "remote_tags_latest" {
+function "tags" {
   params = [name]
-  result = REGISTRY != "" ? ["${REGISTRY}:${name}-${TARGETARCH}", "${REGISTRY}:latest-${TARGETARCH}"] : []
+  result = concat(local_tag(name), remote_tags(name))
+}
+
+function "tags_with_latest" {
+  params = [name]
+  result = REGISTRY != "" \
+    ? ["${REGISTRY}:${name}-${TARGETARCH}", "${REGISTRY}:latest-${TARGETARCH}"] \
+    : ["cap-y:${name}"]
 }
 
 
@@ -74,7 +87,7 @@ group "full" {
 target "cap-y-base" {
   context    = "."
   dockerfile = "docker/Dockerfile.base"
-  tags       = concat(["cap-y:base"], remote_tags("base"))
+  tags       = tags("base")
   platforms  = [TARGETPLATFORM]
   args = {
     TARGETARCH     = TARGETARCH
@@ -86,7 +99,7 @@ target "cap-y-base" {
 target "cap-y-default" {
   context    = "."
   dockerfile = "docker/Dockerfile"
-  tags       = concat(["cap-y:default"], remote_tags("default"))
+  tags       = tags("default")
   platforms  = [TARGETPLATFORM]
   args = {
     TARGETARCH = TARGETARCH
@@ -99,7 +112,7 @@ target "cap-y-default" {
 target "cap-y-open" {
   context    = "."
   dockerfile = "docker/Dockerfile.open"
-  tags       = concat(["cap-y:open"], remote_tags_latest("open"))
+  tags       = tags_with_latest("open")
   platforms  = [TARGETPLATFORM]
   args = {
     TARGETARCH    = TARGETARCH
@@ -113,7 +126,7 @@ target "cap-y-open" {
 target "cap-y-nvidia" {
   context    = "."
   dockerfile = "docker/Dockerfile.nvidia"
-  tags       = concat(["cap-y:nvidia"], remote_tags("nvidia"))
+  tags       = tags("nvidia")
   platforms  = [TARGETPLATFORM]
   args = {
     TARGETARCH = TARGETARCH
@@ -126,7 +139,7 @@ target "cap-y-nvidia" {
 target "cap-y-dev" {
   context    = "."
   dockerfile = "docker/Dockerfile.dev"
-  tags       = concat(["cap-y:dev"], remote_tags("dev"))
+  tags       = tags("dev")
   platforms  = [TARGETPLATFORM]
   args = {
     TARGETARCH    = TARGETARCH

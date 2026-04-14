@@ -63,7 +63,7 @@ RUN --mount=type=cache,target=/root/.ccache \
       -DCMAKE_C_COMPILER_LAUNCHER=ccache \
       -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
       -DCMAKE_PREFIX_PATH="$(python3 -c 'import torch; print(torch.utils.cmake_prefix_path)')" \
-      -DCMAKE_CUDA_ARCHITECTURES="$(echo ${CUDA_ARCH_BIN} | tr -d '.')" \
+      -DCMAKE_CUDA_ARCHITECTURES="$(echo ${CUDA_ARCH_BIN:-8.9} | tr -d '.')" \
       -DBUILD_TESTING=OFF \
     && make -j$(nproc) && make install && ldconfig \
     && rm -rf /opt/nvblox

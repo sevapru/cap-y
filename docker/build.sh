@@ -129,9 +129,14 @@ if [[ "$PUSH" = "1" ]]; then
   BAKE_REGISTRY="${REGISTRY}"
 fi
 
+LOG_FILE="/tmp/cap-y-build-$(date +%Y%m%d-%H%M%S).log"
+echo "Build log: ${LOG_FILE}"
+echo ""
+
 CUDA_ARCH_BIN="${CUDA_ARCH_BIN}" WITH_DEMOGRASP="${WITH_DEMOGRASP:-1}" \
   REGISTRY="${BAKE_REGISTRY}" \
-  docker buildx bake -f "${BAKE_FILE}" "${BAKE_ARGS[@]}" ${BAKE_TARGET}
+  docker buildx bake -f "${BAKE_FILE}" --progress=plain "${BAKE_ARGS[@]}" ${BAKE_TARGET} \
+  2>&1 | tee "${LOG_FILE}"
 
 echo ""
 echo "Built images:"
