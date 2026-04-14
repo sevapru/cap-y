@@ -68,3 +68,12 @@ except Exception:
     # import traceback
     print("R1Pro not installed!")
     # traceback.print_exc()
+
+# Newton remote environment — connects to a remote Newton GPU physics server.
+# Newton and the requests library must be available on the client side;
+# the heavy GPU deps only run on the server.
+try:
+    from .newton_remote import NewtonRemoteEnv
+    register_env("newton_remote", NewtonRemoteEnv)
+except Exception:
+    print("Newton remote env not available (requests not installed?)")

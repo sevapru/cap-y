@@ -53,3 +53,4 @@ last_step.md
 .claude
 scripts/publish-wheels.sh
 .worktrees/
+imgui.ini
