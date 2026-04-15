@@ -54,3 +54,5 @@ last_step.md
 scripts/publish-wheels.sh
 .worktrees/
 imgui.ini
+build.log
+*.plan.md
