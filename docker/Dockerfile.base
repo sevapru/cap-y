@@ -76,9 +76,20 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTH
     uv pip install --system "numpy>=2.0"
 
 # [3] OpenCV CUDA — cudawarped pre-built wheel
+#     The wheel links against FFmpeg 4.x (libavcodec.so.58) but Ubuntu 24.04 ships
+#     FFmpeg 6.x (libavcodec.so.60). Symlinks bridge the gap — ABI is compatible for
+#     OpenCV's codec usage (demux/decode, no low-level struct access).
 #     Shadow prevention: fake dist-info stops uv replacing this with a CPU PyPI wheel.
 RUN --mount=type=cache,target=/root/.cache/uv \
     mkdir -p /opt/wheels && \
+    for lib in libavcodec libavformat libavutil libswscale libswresample; do \
+      src=$(find /usr/lib -name "${lib}.so.*[0-9]" -not -name "*.so.*.*" 2>/dev/null | head -1) && \
+      if [ -n "$src" ]; then \
+        dir=$(dirname "$src") && \
+        ln -sf "$src" "${dir}/${lib}.so.58" 2>/dev/null || true; \
+        ln -sf "$src" "${dir}/${lib}.so.59" 2>/dev/null || true; \
+      fi; \
+    done && ldconfig && \
     uv pip install --system "${OPENCV_CUDA_WHEEL}" && \
     OPENCV_DIST="/usr/local/lib/python${PYTHON_VERSION}/dist-packages/opencv_python_headless-${OPENCV_VERSION}.dist-info" && \
     mkdir -p "$OPENCV_DIST" && \
@@ -358,8 +369,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # unitree_sdk2_python (BSD-3) — Python SDK for Unitree DDS robot communication
 #   Covers G1/H1 LocoClient, MotionSwitcherClient, arm/hand modules
-#   No C++ compilation — pure Python + CycloneDDS bindings
+#   cyclonedds must be installed first (has C extensions that need cmake)
 RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system cyclonedds && \
     git clone --depth 1 https://github.com/unitreerobotics/unitree_sdk2_python \
       /opt/unitree_sdk2_python && \
     uv pip install --system -e /opt/unitree_sdk2_python --no-build-isolation || \

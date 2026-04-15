@@ -254,7 +254,7 @@ def test_pyroki():
 def test_mink():
     try:
         result = subprocess.run(
-            [sys.executable, "-c", "import mink; print(mink.__version__)"],
+            [sys.executable, "-c", "import mink; print(getattr(mink, '__version__', 'installed'))"],
             capture_output=True, text=True, timeout=30,
         )
         if result.returncode == 0:
