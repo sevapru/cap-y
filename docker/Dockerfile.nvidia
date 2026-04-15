@@ -39,8 +39,7 @@ RUN if [ "$(uname -m)" = "x86_64" ]; then \
         ros-${ROS_DISTRO}-isaac-ros-cumotion \
         ros-${ROS_DISTRO}-isaac-ros-visual-slam \
         ros-${ROS_DISTRO}-nvblox \
-      && rm -rf /var/lib/apt/lists/* \
-      || echo "WARNING: Some Isaac ROS packages may require NVIDIA entitlement"; \
+      && rm -rf /var/lib/apt/lists/*; \
     else \
       curl -fsSL https://isaac.download.nvidia.com/isaac-ros/repos.key \
         | gpg --dearmor -o /usr/share/keyrings/nvidia-isaac-ros.gpg && \

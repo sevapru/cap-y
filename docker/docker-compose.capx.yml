@@ -54,7 +54,6 @@ services:
       - ${HOME}/.cache/huggingface:/data/huggingface
       - capx-uv-cache:/root/.cache/uv
       - capx-ccache:/root/.ccache
-    restart: unless-stopped
 
   # ---------------------------------------------------------------------------
   # cap-y:default — + cuRobo + ContactGraspNet (NVIDIA NC license)
@@ -73,13 +72,14 @@ services:
     shm_size: "8g"
     init: true
     ports:
+      - "8100:8100"    # Serving gateway
       - "8110:8110"    # OpenRouter LLM proxy
       - "8113:8113"    # SAM2 (full profile)
       - "8114:8114"    # SAM3
       - "8115:8115"    # ContactGraspNet
       - "8116:8116"    # PyRoKi IK
-      - "8117:8117"    # OWL-ViT (full profile)
-      - "8118:8118"    # CuRobo (custom profile)
+      - "8117:8117"    # CuRobo (NVIDIA NC)
+      - "8118:8118"    # OWL-ViT (full profile)
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
@@ -126,6 +126,7 @@ services:
       - "8116:8116"    # PyRoKi IK
       - "8119:8119"    # DemoGrasp (MIT)
       - "8120:8120"    # GraspAnalytic / rh56_controller (MIT)
+      - "8124:8124"    # Newton
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
@@ -166,11 +167,13 @@ services:
     init: true
     profiles: ["nvidia", "all"]
     ports:
+      - "8100:8100"    # Serving gateway
       - "8110:8110"
       - "8114:8114"
       - "8116:8116"
       - "8119:8119"
       - "8120:8120"
+      - "8124:8124"    # Newton
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
@@ -218,7 +221,6 @@ services:
       - HF_HOME=/data/huggingface
       - CUDA_HOME=/usr/local/cuda
       - MUJOCO_GL=egl
-      - CAPX_PROFILE=${CAPX_PROFILE:-open}
     volumes:
       - ..:/workspace
       - ${HOME}/.cache/huggingface:/data/huggingface
