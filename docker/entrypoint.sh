@@ -47,6 +47,8 @@ if [[ $# -gt 0 ]]; then
   exec "$@"
 fi
 
+rm -f /tmp/.capx-ready
+
 if [[ -f .openrouterkey ]]; then
   echo "[entrypoint] Starting OpenRouter LLM proxy on port 8110..."
   python -m capx.serving.openrouter_server \
@@ -56,6 +58,23 @@ if [[ -f .openrouterkey ]]; then
 fi
 
 echo "[entrypoint] Starting cap-x servers (profile: ${CAPX_PROFILE:-default})..."
-exec python -m capx.serving.launch_servers \
+python -m capx.serving.launch_servers \
   --profile "${CAPX_PROFILE:-default}" \
-  --host "${CAPX_HOST:-0.0.0.0}"
+  --host "${CAPX_HOST:-0.0.0.0}" &
+SERVER_PID=$!
+
+# Wait for gateway to bind (max 60s), then signal readiness for Docker healthcheck
+for _i in $(seq 1 60); do
+  if python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1', 8100)); s.close()" 2>/dev/null; then
+    touch /tmp/.capx-ready
+    echo "[entrypoint] Servers ready (gateway on :8100)"
+    break
+  fi
+  sleep 1
+done
+
+if [ ! -f /tmp/.capx-ready ]; then
+  echo "[entrypoint] WARNING: servers did not become ready within 60s" >&2
+fi
+
+wait $SERVER_PID

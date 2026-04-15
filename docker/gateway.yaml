@@ -13,6 +13,8 @@ profiles:
       pyroki: {port: 8116, desc: "IK solver (JAX, MIT)"}
     inference:
       llm: {port: 8110, desc: "OpenRouter LLM proxy"}
+    simulation:
+      newton: {port: 8124, desc: "GPU physics (Newton/Warp, Apache 2.0)"}
 
   default:
     perception:
@@ -39,6 +41,8 @@ profiles:
       curobo: {port: 8117, desc: "Collision-free trajectories"}
     inference:
       llm: {port: 8110, desc: "OpenRouter LLM proxy"}
+    simulation:
+      newton: {port: 8124, desc: "GPU physics (Newton/Warp, Apache 2.0)"}
 
   nvidia:
     # NOTE: cuVSLAM, cuMotion, nvblox are ROS2 nodes (topic-based), not HTTP servers.
@@ -53,6 +57,8 @@ profiles:
       pyroki: {port: 8116, desc: "IK solver (JAX)"}
     inference:
       llm: {port: 8110, desc: "OpenRouter LLM proxy"}
+    simulation:
+      newton: {port: 8124, desc: "GPU physics (Newton/Warp, Apache 2.0)"}
     # Future (needs FastAPI wrappers — see ROADMAP.md):
     # scene: nvblox (ROS2 node -> HTTP bridge needed)
     # motion: cumotion (ROS2 MoveIt plugin -> HTTP bridge needed)
