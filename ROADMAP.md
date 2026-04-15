@@ -17,15 +17,13 @@ Build all four container images on a self-hosted Jetson Thor runner, push to GHC
 
 ---
 
-## Multi-Arch Build Matrix
+## Multi-Arch Build Matrix ✓ DONE
 
-Add `sm_89` (RTX 4080 / RTX 4090) as a second build target alongside `sm_110`.
+Unified Dockerfiles with `TARGETARCH` multi-stage builds. `docker-bake.hcl` handles the dependency graph. Images are tagged `sevapru/cap-y:{variant}-{amd64,arm64}` and joined via `docker buildx imagetools create`. See "Development Notes" section below for details.
 
-- Extend `build.sh` to accept `--arch-list "11.0 8.9"` and build both in parallel
-- Tag images as `cap-y:latest-sm110`, `cap-y:latest-sm89`, plus `cap-y:latest` pointing to sm110
-- Validate on a desktop RTX 4080 with the existing test suite
-
-**Subagent inputs needed:** Access to an RTX 4080 / 4090 machine for validation.
+- amd64 (x86_64): validated on RTX 4080, `CUDA_ARCH_BIN=8.9`
+- arm64 (aarch64): validated on Jetson Thor, `CUDA_ARCH_BIN=11.0`
+- `TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;8.9;9.0;10.0;12.0+PTX"` covers all current + future GPUs via PTX forward compat
 
 ---
 
@@ -136,6 +134,109 @@ Create FastAPI HTTP wrappers for Isaac ROS nodes so the gateway can proxy them:
 
 Each wrapper subscribes to the ROS2 topic internally and exposes a stateless HTTP API.
 Requires cap-y:nvidia image with ROS2 + Isaac ROS workspace.
+
+---
+
+## Development Notes
+
+Accumulated findings, architecture decisions, and gotchas from building and deploying the Docker stack across aarch64 (Jetson Thor) and x86_64 (RTX 4080/4090, Blackwell).
+
+### Unified Dockerfile architecture
+
+A single set of Dockerfiles under `docker/` serves both architectures. `Dockerfile.base` uses Docker's built-in `TARGETARCH` (amd64/arm64) with multi-stage `FROM arch-${TARGETARCH}`:
+
+- **amd64 stage**: pre-built GPU wheels (cudawarped OpenCV, `jax[cuda13]` pip, PyPI Open3D, PyTorch cu130). Build time ~5 min.
+- **arm64 stage**: source compilation (OpenCV cmake, Open3D cmake+clang, JAX Bazel). Build time ~45 min.
+- **final stage**: common packages (mink, rh56_controller, DemoGrasp, Newton, pymodbus, unitree_sdk2_python, capx deps, ROS 2 minimal).
+
+No `PLATFORM_ARCH` variable needed. `docker buildx bake -f docker/docker-bake.hcl all` handles everything.
+
+### Bake dependency graph
+
+`docker-bake.hcl` declares image dependencies via `contexts = { "cap-y:base" = "target:cap-y-base" }` — bake resolves the full graph and builds in the correct order automatically. This replaces manual sequential `docker compose build` calls that failed with "image not found" race conditions.
+
+Groups: `default` (base only), `all` (base + default + open + nvidia), `full` (all + dev).
+
+### Per-image entrypoint behavior
+
+| Image | ENTRYPOINT | CMD | Behavior |
+|-------|-----------|-----|----------|
+| `cap-y:base` | (NVIDIA default) | `["bash"]` | Interactive shell, no servers |
+| `cap-y:default` | `/entrypoint.sh` | `[]` | Launches `CAPX_PROFILE=default` servers |
+| `cap-y:open` | `/entrypoint.sh` | `[]` | Launches `CAPX_PROFILE=open` servers |
+| `cap-y:nvidia` | `/entrypoint.sh` | `[]` | Launches `CAPX_PROFILE=nvidia` servers |
+| `cap-y:dev` | `[]` | `["bash"]` | Interactive shell, no servers |
+
+Server images write `/tmp/.capx-ready` after the gateway binds on port 8100. Compose healthchecks test this file.
+
+### CUDA architecture strategy
+
+`TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;8.9;9.0;10.0;12.0+PTX"` covers Turing through Blackwell desktop. `+PTX` on 12.0 provides forward compatibility — PTX JIT-compiles at runtime on any future SM (including SM 13.0 / GB300). Explicitly listing SM 13.0 causes `ValueError: Unknown CUDA arch` in PyTorch 2.11.0.
+
+`CUDA_ARCH_BIN` (set via `build.sh` or `docker/.env`) targets cmake-based source builds (nvblox, cuRobo, ContactGraspNet) to a specific GPU. Auto-detected via `nvidia-smi --query-gpu=compute_cap`. Defaults: 8.9 for x86_64, 11.0 for aarch64. Exported to `ENV` in base so all child images inherit it.
+
+### Jetson Thor compatibility
+
+Jetson Thor (SM 110) runs the same `nvcr.io/nvidia/cuda:13.0.0-cudnn-devel-ubuntu24.04` base as x86_64 — it is NOT an L4T image. This is intentional: Thor runs Ubuntu 24.04 natively (not JetPack/L4T). Builds for Thor also work on Orin devices when `CUDA_ARCH_BIN` is adjusted.
+
+### OpenCV CUDA at build time
+
+`libcuda.so.1` (the NVIDIA driver stub) is never present during `docker build`. OpenCV CUDA wheels import it at load time, so any `import cv2` validation in a `RUN` step will fail with `ImportError: libcuda.so.1: cannot open shared object file`. The CUDA build check is done in `entrypoint.sh` at container startup instead, with `|| true` so it doesn't abort if the container runs without a GPU.
+
+### Shadow prevention for OpenCV
+
+The cudawarped OpenCV wheel installs as `opencv_contrib_python_rolling`, but `pyproject.toml` depends on `opencv-python-headless`. Without intervention, `uv` installs the CPU-only PyPI wheel on top of the CUDA wheel. A fake `.dist-info` directory for `opencv-python-headless` is created in the Dockerfile to prevent this.
+
+### Unitree hand control — two paths
+
+- **RH56DFTP** (Ethernet Modbus TCP): `pymodbus>=3.12` is installed in `cap-y:base`. Register map: `ANGLE_SET=1486`, `ANGLE_ACT=1546`, `FORCE_SET=1498` (6x int16, 0-1000). No C++ compilation needed. See [ProsusAI/robot-teleop](https://github.com/ProsusAI/robot-teleop) for the Modbus TCP driver pattern.
+- **RH56DFX** (DDS via dfx_inspire_service): requires `unitree_sdk2` C++ headers. Source is cloned to `/opt/dfx_inspire_service` in `cap-y:open` for reference but C++ colcon build is skipped (manual build instructions in the Dockerfile).
+
+`unitree_sdk2_python` (BSD-3, Python-only DDS bindings) is installed in `cap-y:base` for programmatic robot control without C++ compilation.
+
+### Docker content store corruption
+
+The rootless Docker driver (`docker:rootless`) periodically loses blob references during parallel multi-image builds: `failed to get reader from content store: blob sha256:... not found`. Fix: `docker builder prune -f && sudo systemctl restart docker`. This is a known Docker/containerd issue, not a Dockerfile problem.
+
+### uv hardlink warning in Docker
+
+`warning: Failed to hardlink files; falling back to full copy` is expected — Docker overlayfs mounts the uv cache and the target on different filesystems. `UV_LINK_MODE=copy` is set in the base image ENV to suppress it. No performance impact.
+
+### nvblox — no pre-built wheels
+
+As of 2025, nvblox has no PyPI wheel (`TODO: Try re-enabling this once we have a pypi page` — upstream). Source build is required on both arches. `FETCHCONTENT_BASE_DIR=/root/.cache/nvblox-deps` caches cmake FetchContent dependencies (stdgpu, Eigen, etc.) between rebuilds.
+
+### Multi-arch registry workflow
+
+Build and push from each machine:
+```bash
+./docker/build.sh --push --registry sevapru/cap-y --all   # on each arch
+```
+
+Create unified manifests (from any machine):
+```bash
+for img in base default open nvidia; do
+  docker buildx imagetools create -t sevapru/cap-y:${img} \
+    sevapru/cap-y:${img}-amd64 sevapru/cap-y:${img}-arm64
+done
+```
+
+After this, `docker pull sevapru/cap-y:base` auto-selects the correct architecture.
+
+### Test coverage
+
+Container smoke tests (`scripts/test_container_*.py`) validate:
+- CUDA runtime, OpenCV CUDA, PyTorch CUDA, Open3D CUDA, JAX GPU
+- pymodbus, unitree_sdk2_python, Newton (added April 2026)
+- cuRobo + ContactGraspNet (required only on `cap-y:default` via `CAPY_REQUIRE_LICENSED_STACK=1`)
+- ROS 2 Jazzy stack, CycloneDDS, Nav2, MoveIt 2, nvblox, Drake, LiveKit
+- Isaac ROS packages (arch-aware: apt debs on x86_64, colcon dirs on aarch64)
+
+Run via compose profiles:
+```bash
+docker compose -f docker/docker-compose.capx.yml --profile test run --rm capx-test
+docker compose -f docker/docker-compose.capx.yml --profile test-default run --rm capx-test-default
+```
 
 ---
 

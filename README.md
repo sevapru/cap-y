@@ -120,32 +120,35 @@ The entrypoint runs an editable install of the package on every start so code ch
 
 ### Pull & Run
 
-All four images are available from GHCR as tags on `ghcr.io/sevapru/cap-y`:
+All four images are published to [Docker Hub](https://hub.docker.com/r/sevapru/cap-y) as multi-arch manifests (amd64 + arm64):
 
 | Tag | Pull command | Commercial |
 |-----|-------------|-----------|
-| `cap-y:base` | `docker pull ghcr.io/sevapru/cap-y:base` | Yes (SAM conditions) |
-| `cap-y:default` | `docker pull ghcr.io/sevapru/cap-y:default` | No (NVIDIA NC) |
-| `cap-y:open` | `docker pull ghcr.io/sevapru/cap-y:open` | Yes (SAM conditions) |
-| `cap-y:nvidia` | `docker pull ghcr.io/sevapru/cap-y:nvidia` | Enterprise agreement |
+| `cap-y:base` | `docker pull sevapru/cap-y:base` | Yes (SAM conditions) |
+| `cap-y:default` | `docker pull sevapru/cap-y:default` | No (NVIDIA NC) |
+| `cap-y:open` | `docker pull sevapru/cap-y:open` | Yes (SAM conditions) |
+| `cap-y:nvidia` | `docker pull sevapru/cap-y:nvidia` | Enterprise agreement |
+| `cap-y:latest` | `docker pull sevapru/cap-y` | Yes (= open) |
 
 ```bash
 # base — MIT/Apache clean: SAM3 + pyroki + mink + DemoGrasp + rh56_controller
-docker pull ghcr.io/sevapru/cap-y:base
-docker run -it --rm --runtime nvidia --entrypoint bash -v .:/workspace ghcr.io/sevapru/cap-y:base
+docker pull sevapru/cap-y:base
+docker run -it --rm --runtime nvidia --entrypoint bash -v .:/workspace sevapru/cap-y:base
 
 # default — + cuRobo + ContactGraspNet (NVIDIA NC, research only)
-docker pull ghcr.io/sevapru/cap-y:default
-docker run -it --rm --runtime nvidia --entrypoint bash -v .:/workspace ghcr.io/sevapru/cap-y:default
+docker pull sevapru/cap-y:default
+docker run -it --rm --runtime nvidia --entrypoint bash -v .:/workspace sevapru/cap-y:default
 
-# open — base + ROS 2 Jazzy, Nav2, MoveIt 2, nvblox, LiveKit, Inspire hand
-docker pull ghcr.io/sevapru/cap-y:open
-docker run -it --rm --runtime nvidia --entrypoint bash -v .:/workspace ghcr.io/sevapru/cap-y:open
+# open — base + ROS 2 Jazzy, Nav2, MoveIt 2, nvblox, LiveKit, Inspire hand (= latest)
+docker pull sevapru/cap-y:open
+docker run -it --rm --runtime nvidia --entrypoint bash -v .:/workspace sevapru/cap-y:open
 
 # nvidia — open + Isaac ROS cuMotion, cuVSLAM, ScheduleStream
-docker pull ghcr.io/sevapru/cap-y:nvidia
-docker run -it --rm --runtime nvidia --entrypoint bash -v .:/workspace ghcr.io/sevapru/cap-y:nvidia
+docker pull sevapru/cap-y:nvidia
+docker run -it --rm --runtime nvidia --entrypoint bash -v .:/workspace sevapru/cap-y:nvidia
 ```
+
+Arch-specific tags (`sevapru/cap-y:base-amd64`, `sevapru/cap-y:base-arm64`, etc.) are also available if you need to pin a specific architecture.
 
 Verify after pull (GPU required; each line is a separate image check):
 ```bash
@@ -159,21 +162,32 @@ docker compose -f docker-compose.capx.yml --profile test-nvidia run --rm capx-te
 
 ### Build from Source (like... 3 hours?)
 
-> ⚡ Tested on **Jetson AGX Thor** (sm_110, CUDA 13.0, 128 GB unified memory)
+> ⚡ Tested on **Jetson AGX Thor** (sm_110, CUDA 13.0, 128 GB unified memory) and **x86_64** (RTX 4080, sm_89)
 
 ```bash
-git clone --recurse-submodules https://github.com/sevapru/cap-y && cd cap-y/docker
+git clone --recurse-submodules https://github.com/sevapru/cap-y && cd cap-y
 
-./build.sh # Or specify GPU architecture: --arch <gpu_version> ( --arch 8.9 for RTX 4080, default: 11.0)
+./docker/build.sh                        # base only, auto-detect GPU
+./docker/build.sh --all                  # full 4-image chain
+./docker/build.sh --all --cuda-arch 8.9  # explicit GPU arch (RTX 4080/4090)
+./docker/build.sh --all --push           # build + push to Docker Hub with arch suffix
 ```
-Subsequent builds use ccache (~10 min)
-Build takes ~2-3 hours first time (OpenCV CUDA + Open3D CUDA + JAX from source)
 
-`build.sh` calls `nvidia-smi --query-gpu=compute_cap` to auto-detect your GPU and passes the result as `CUDA_ARCH_BIN`. On Jetson Thor this returns `11.0`. If detection fails (no GPU on the build machine, CI environment), pass `--arch` explicitly — the script exits with a clear error rather than silently defaulting. Use `--all` to build the full 4-image chain: `cap-y:base` → `cap-y:default` (parallel) and `cap-y:base` → `cap-y:open` → `cap-y:nvidia`.
+Subsequent builds use ccache (~10 min). First build takes ~2-3 hours (OpenCV CUDA + Open3D CUDA + JAX from source).
 
-Check log for errors: `/tmp/cap-y-build.log`
+`build.sh` calls `nvidia-smi --query-gpu=compute_cap` to auto-detect your GPU and passes the result as `CUDA_ARCH_BIN`. On Jetson Thor this returns `11.0`. If detection fails (no GPU on the build machine, CI environment), pass `--cuda-arch` explicitly. Use `--all` to build the full 4-image chain: `cap-y:base` → `cap-y:default` (parallel) and `cap-y:base` → `cap-y:open` → `cap-y:nvidia`.
+
+Build log is written to `/tmp/cap-y-build-YYYYMMDD-HHMMSS.log`.
+
+`--push` tags each image with an arch suffix (e.g. `sevapru/cap-y:base-amd64`) and pushes to `$REGISTRY` (default: `sevapru/cap-y`). After pushing from both machines, create multi-arch manifests:
+
 ```bash
-grep -i "error:" /tmp/cap-y-build.log | grep -v warning
+for img in base default open nvidia; do
+  docker buildx imagetools create -t "sevapru/cap-y:$img" \
+    "sevapru/cap-y:$img-amd64" "sevapru/cap-y:$img-arm64"
+done
+docker buildx imagetools create -t sevapru/cap-y:latest \
+  sevapru/cap-y:latest-amd64 sevapru/cap-y:latest-arm64
 ```
 
 ### Build with Docker Compose
@@ -189,14 +203,23 @@ docker compose -f docker-compose.capx.yml --profile base up -d --build cap-y-bas
 
 `COMPOSE_PROFILES` (comma-separated) is equivalent to repeating `--profile` ([Compose reference](https://github.com/docker/compose/blob/main/docs/reference/compose.md)). Use **one** of `base`, `default`, `open`, or `nvidia` for running servers so ports do not collide.
 
-Build args:
+Build args (Compose / Dockerfile):
 
 | Arg | Effect | Example |
 |-----|--------|---------|
 | `CUDA_ARCH_BIN` | GPU compute capability | `--build-arg CUDA_ARCH_BIN=8.9` (RTX 4080) |
 | `WITH_LIBERO=1` | Add LIBERO evaluation venv (robosuite/MuJoCo) | `--build-arg WITH_LIBERO=1` |
 | `CLEAN_CACHES=1` | Remove bazel/uv/ccache for smaller image | `--build-arg CLEAN_CACHES=1` |
-| `--all` (build.sh) | Build all 4 images: base → default + base → open → nvidia | `./build.sh --all` |
+
+`build.sh` flags:
+
+| Flag | Effect | Example |
+|------|--------|---------|
+| `--all` | Build all 4 images: base → default + base → open → nvidia | `./docker/build.sh --all` |
+| `--dev` | Build cap-y:dev after base (all extras + sim venvs) | `./docker/build.sh --dev` |
+| `--push` | Tag with arch suffix and push to registry | `./docker/build.sh --all --push` |
+| `--registry REPO` | Override registry (default: `sevapru/cap-y`) | `--registry ghcr.io/org/cap-y` |
+| `--cuda-arch CAP` | GPU compute capability (auto-detected if omitted) | `--cuda-arch 9.0` |
 
 ```bash
 # Publishing: full image with LIBERO + clean caches
@@ -272,7 +295,7 @@ OpenCV CUDA and Open3D CUDA are available via the `cap-y` container (cmake/sourc
 
 ## Container Family
 
-Four tags, one image (`ghcr.io/sevapru/cap-y`). Build chain: base → default, base → open → nvidia.
+Five tags, one repo ([`sevapru/cap-y`](https://hub.docker.com/r/sevapru/cap-y)), multi-arch (amd64 + arm64). Build chain: base → default, base → open → nvidia. `latest` = `open`.
 
 ```mermaid
 flowchart TD
