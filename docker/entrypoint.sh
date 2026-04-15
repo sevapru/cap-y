@@ -63,6 +63,11 @@ python -m capx.serving.launch_servers \
   --host "${CAPX_HOST:-0.0.0.0}" &
 SERVER_PID=$!
 
+# Forward SIGTERM/SIGINT to the server process so tini → bash → python gets graceful shutdown.
+# Without this, tini sends SIGTERM to bash (PID 1's child), bash exits, and the kernel
+# SIGKILL's the orphaned python process with no chance for connection draining or cleanup.
+trap 'kill -TERM $SERVER_PID 2>/dev/null; wait $SERVER_PID' TERM INT
+
 # Wait for gateway to bind (max 60s), then signal readiness for Docker healthcheck
 for _i in $(seq 1 60); do
   if python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1', 8100)); s.close()" 2>/dev/null; then
