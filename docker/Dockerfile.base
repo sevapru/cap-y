@@ -40,10 +40,20 @@ ENV DEBIAN_FRONTEND=noninteractive \
     TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;8.9;9.0;10.0;12.0+PTX" \
     ROS_DISTRO=${ROS_DISTRO} \
     CAPX_INSTALL_EXTRAS="" \
+    CCACHE_DIR=/root/.ccache \
     PATH="/usr/local/cuda/bin:${PATH}" \
     LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}" \
     UV_HTTP_TIMEOUT=300 \
     UV_LINK_MODE=copy
+
+ARG APT_MIRROR="mirror.nl.leaseweb.net"
+RUN sed -i \
+      -e "s|http://archive.ubuntu.com/ubuntu|http://${APT_MIRROR}/ubuntu|" \
+      -e "s|http://security.ubuntu.com/ubuntu|http://${APT_MIRROR}/ubuntu|" \
+      -e 's/ noble-backports//' \
+      -e '/^Components:/s/ restricted//' \
+      -e '/^Components:/s/ multiverse//' \
+    /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
 
 # [1] System deps — no cmake/ninja (nothing compiled from source in amd64 base)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -76,10 +86,6 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTH
     uv pip install --system "numpy>=2.0"
 
 # [3] OpenCV CUDA — cudawarped pre-built wheel
-#     The wheel links against FFmpeg 4.x (libavcodec.so.58) but Ubuntu 24.04 ships
-#     FFmpeg 6.x (libavcodec.so.60). Symlinks bridge the gap — ABI is compatible for
-#     OpenCV's codec usage (demux/decode, no low-level struct access).
-#     Shadow prevention: fake dist-info stops uv replacing this with a CPU PyPI wheel.
 RUN --mount=type=cache,target=/root/.cache/uv \
     mkdir -p /opt/wheels && \
     for lib in libavcodec libavformat libavutil libswscale libswresample; do \
@@ -140,6 +146,16 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}" \
     UV_HTTP_TIMEOUT=300 \
     UV_LINK_MODE=copy
+
+# Same apt trim as amd64 stage
+ARG APT_MIRROR="mirror.nl.leaseweb.net"
+RUN sed -i \
+      -e "s|http://archive.ubuntu.com/ubuntu|http://${APT_MIRROR}/ubuntu|" \
+      -e "s|http://security.ubuntu.com/ubuntu|http://${APT_MIRROR}/ubuntu|" \
+      -e 's/ noble-backports//' \
+      -e '/^Components:/s/ restricted//' \
+      -e '/^Components:/s/ multiverse//' \
+    /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
 
 # [1] System deps — includes cmake + clang for source builds
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -278,6 +294,7 @@ RUN rm -f /usr/local/cuda/lib64/stubs/libcuda.so.1
 
 # [7] JAX — built from source via Bazel (SM 110; no PTX in prebuilt wheels for Jetson Thor)
 RUN --mount=type=cache,target=/root/.cache/bazel \
+    --mount=type=cache,target=/root/.cache/uv \
     git clone --branch "jax-v${JAX_VERSION}" --depth=1 --recursive https://github.com/google/jax /opt/jax && \
     cd /opt/jax && mkdir -p /opt/jax/wheels && \
     python3 build/build.py build \
