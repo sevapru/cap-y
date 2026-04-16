@@ -190,7 +190,7 @@ def test_drake():
 
     try:
         r = subprocess.run(
-            [sys.executable, "-c", "import pydrake; print(pydrake.__version__)"],
+            [sys.executable, "-c", "import pydrake; print(getattr(pydrake, '__version__', 'installed'))"],
             capture_output=True, text=True, timeout=10,
         )
         if r.returncode == 0:
