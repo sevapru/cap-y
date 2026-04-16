@@ -80,6 +80,7 @@ services:
       - "8116:8116"    # PyRoKi IK
       - "8117:8117"    # CuRobo (NVIDIA NC)
       - "8118:8118"    # OWL-ViT (full profile)
+      - "8124:8124"    # Newton
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all

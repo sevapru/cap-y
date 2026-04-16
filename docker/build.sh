@@ -18,6 +18,7 @@ CUDA_ARCH_BIN=""
 BUILD_ALL=0
 BUILD_DEV=0
 PUSH=0
+PUSH_ONLY=0
 REGISTRY="${REGISTRY:-sevapru/cap-y}"
 
 usage() {
@@ -30,7 +31,8 @@ Options:
   --file FILE       Compose file (default: docker/docker-compose.capx.yml)
   --all             Build all images: base → default, base → open → nvidia
   --dev             Build cap-y:dev after base (all extras + sim venvs)
-  --push            Tag with arch suffix and push to \$REGISTRY (default: sevapru/cap-y)
+  --push            Build + tag with arch suffix + push to \$REGISTRY
+  --push-only       Tag and push existing local images (no rebuild)
   --registry REPO   Override registry repo (default: sevapru/cap-y)
   -h, --help        Show this help
 
@@ -60,6 +62,7 @@ while [[ $# -gt 0 ]]; do
     --all)          BUILD_ALL=1; shift ;;
     --dev)          BUILD_DEV=1; shift ;;
     --push)         PUSH=1; shift ;;
+    --push-only)    PUSH_ONLY=1; PUSH=1; shift ;;
     --registry)     REGISTRY="$2"; shift 2 ;;
     -h|--help)      usage ;;
     *) echo "Unknown option: $1"; usage ;;
@@ -94,6 +97,33 @@ cat > "${ENV_FILE}" <<EOF
 CUDA_ARCH_BIN=${CUDA_ARCH_BIN}
 EOF
 
+# ── Push helper ───────────────────────────────────────────────────────────────
+_push_images() {
+  local ARCH
+  ARCH="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+  echo ""
+  echo "Pushing to ${REGISTRY} (arch: ${ARCH})..."
+  for img in base default open nvidia dev; do
+    if docker image inspect "cap-y:${img}" &>/dev/null; then
+      docker tag "cap-y:${img}" "${REGISTRY}:${img}-${ARCH}"
+      echo "  pushing ${REGISTRY}:${img}-${ARCH}"
+      docker push "${REGISTRY}:${img}-${ARCH}"
+    fi
+  done
+  docker tag "cap-y:open" "${REGISTRY}:latest-${ARCH}" 2>/dev/null && \
+    docker push "${REGISTRY}:latest-${ARCH}" && \
+    echo "  pushing ${REGISTRY}:latest-${ARCH}"
+  echo ""
+  echo "Pushed:"
+  docker image ls "${REGISTRY}"
+}
+
+# ── Push-only mode (no rebuild) ──────────────────────────────────────────────
+if [[ "$PUSH_ONLY" = "1" ]]; then
+  _push_images
+  exit 0
+fi
+
 # ── Build ─────────────────────────────────────────────────────────────────────
 export CUDA_ARCH_BIN
 
@@ -102,40 +132,26 @@ BAKE_FILE="$(dirname "${COMPOSE_FILE}")/docker-bake.hcl"
 
 # Select bake group / targets
 if [[ "$BUILD_ALL" = "1" && "$BUILD_DEV" = "1" ]]; then
-  BAKE_TARGET="full"    # base + default + open + nvidia + dev
+  BAKE_TARGET="full"
 elif [[ "$BUILD_ALL" = "1" ]]; then
-  BAKE_TARGET="all"     # base + default + open + nvidia
+  BAKE_TARGET="all"
 else
   BAKE_TARGET="cap-y-base"
 fi
 
 if [[ "$BUILD_DEV" = "1" && "$BUILD_ALL" != "1" ]]; then
-  # dev depends on base; bake resolves it via contexts
   BAKE_TARGET="cap-y-base cap-y-dev"
 fi
 
 echo "Building: ${BAKE_TARGET}  [arch=auto (TARGETARCH), cuda_arch=${CUDA_ARCH_BIN:-auto}]"
-echo "Bake resolves the dependency graph — no manual ordering needed."
 echo ""
-
-BAKE_ARGS=()
-if [[ "$PUSH" = "1" ]]; then
-  BAKE_ARGS+=(--push)
-  echo "Registry: ${REGISTRY}  (tags: *-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/'))"
-fi
-
-BAKE_REGISTRY=""
-if [[ "$PUSH" = "1" ]]; then
-  BAKE_REGISTRY="${REGISTRY}"
-fi
 
 LOG_FILE="/tmp/cap-y-build-$(date +%Y%m%d-%H%M%S).log"
 echo "Build log: ${LOG_FILE}"
 echo ""
 
 CUDA_ARCH_BIN="${CUDA_ARCH_BIN}" WITH_DEMOGRASP="${WITH_DEMOGRASP:-1}" \
-  REGISTRY="${BAKE_REGISTRY}" \
-  docker buildx bake -f "${BAKE_FILE}" "${BAKE_ARGS[@]}" ${BAKE_TARGET} \
+  docker buildx bake -f "${BAKE_FILE}" ${BAKE_TARGET} \
   2>&1 | tee "${LOG_FILE}"
 
 echo ""
@@ -143,27 +159,5 @@ echo "Built images:"
 docker image ls cap-y
 
 if [[ "$PUSH" = "1" ]]; then
-  ARCH="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
-  echo ""
-  echo "Pushing to ${REGISTRY} (arch: ${ARCH})..."
-  for img in base default open nvidia dev; do
-    TAG="${REGISTRY}:${img}-${ARCH}"
-    if docker image inspect "${TAG}" &>/dev/null 2>&1; then
-      echo "  pushing ${TAG}"
-      docker push "${TAG}"
-    fi
-  done
-  # latest-<arch> is an alias for open
-  LATEST_TAG="${REGISTRY}:latest-${ARCH}"
-  if docker image inspect "${LATEST_TAG}" &>/dev/null 2>&1; then
-    echo "  pushing ${LATEST_TAG}"
-    docker push "${LATEST_TAG}"
-  fi
-  echo ""
-  echo "Pushed tags:"
-  docker image ls "${REGISTRY}"
-fi
-if [[ "$PUSH" = "1" ]]; then
-  docker image ls --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}' \
-    --filter "reference=${REGISTRY}:*"
+  _push_images
 fi
